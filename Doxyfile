@@ -1,0 +1,43 @@
+# Doxyfile for MiraDAC (da library)
+# Adapted from ref/tpsa/doc/Doxyfile
+# Run: doxygen Doxyfile  (from repo root)
+
+PROJECT_NAME           = "da"
+PROJECT_NUMBER         = 1.0.0
+PROJECT_BRIEF          = "MiraDAC — unified numerical (NDA) and symbolic (SDA) Differential Algebra library"
+
+OUTPUT_DIRECTORY       = doc/doxygen
+
+# Sources: only the public headers
+INPUT                  = include/da
+RECURSIVE              = YES
+FILE_PATTERNS          = *.h *.hpp
+
+# Extract everything (templates, private members etc.)
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = YES
+
+# HTML output; no LaTeX
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+HTML_OUTPUT            = html
+HTML_TIMESTAMP         = YES
+
+# Preprocessing — needed so #ifdef DA_WITH_SYMBOLIC sections are documented
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = NO
+PREDEFINED             = DA_WITH_SYMBOLIC DA_CHECK_ENV=1
+
+# Dot / graphviz (set HAVE_DOT=YES if graphviz is installed)
+HAVE_DOT               = NO
+
+# Warnings
+QUIET                  = NO
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_ERROR      = YES
+
+# Encoding
+INPUT_ENCODING         = UTF-8

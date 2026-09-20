@@ -1,0 +1,72 @@
+name: CI
+
+# Builds and tests both variants of the `da` library:
+#   * numerical-only  (WITH_SYMBOLIC=OFF)  — no external dependencies
+#   * numerical+symbolic (WITH_SYMBOLIC=ON) — SymEngine from conda-forge
+#
+# Mirrors the exact configure commands used during development so the
+# SymEngine-enabled build is reproducible.
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  numerical:
+    name: Numerical (WITH_SYMBOLIC=OFF)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ ninja-build
+
+      - name: Configure + build + test (guard ON)
+        run: ./build.sh --build-dir build-off --jobs 2
+
+      - name: Tests under AddressSanitizer (leak detection on)
+        run: |
+          cmake --build build-off --target run_tests_asan -j2
+          # Run from test/ so the reference data files resolve.
+          cd test && ASAN_OPTIONS=detect_leaks=1 ../build-off/test/run_tests_asan
+
+      - name: Configure + build + test (guard compiled out)
+        run: ./build.sh --no-check-env --build-dir build-off-noguard --jobs 2
+
+      - name: Install smoke-test (find_package(da))
+        run: |
+          cmake --install build-off --prefix "$PWD/_install"
+          test -f "$PWD/_install/lib/cmake/da/daConfig.cmake"
+          find "$PWD/_install" -maxdepth 3 -name 'libda*' -o -name 'da.h'
+
+  symbolic:
+    name: Symbolic (WITH_SYMBOLIC=ON, SymEngine via conda-forge)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -el {0}   # login shell so the conda env is active
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y cmake g++
+
+      - name: Set up SymEngine from conda-forge
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          channels: conda-forge
+          channel-priority: strict
+
+      - name: Install SymEngine
+        run: conda install -y symengine gmp
+
+      - name: Configure + build + test (symbolic)
+        run: |
+          # $CONDA_PREFIX points at the active conda env that has SymEngine + GMP.
+          ./build.sh --symbolic \
+            --symengine-dir "$CONDA_PREFIX/lib/cmake/symengine" \
+            --gmp-dir "$CONDA_PREFIX" \
+            --build-dir build-on --jobs 2

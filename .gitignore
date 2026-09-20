@@ -1,0 +1,33 @@
+# Build directories
+build/
+build-*/
+_build/
+_install/
+
+# Reference libraries (read-only upstream clones, not a dependency of this project)
+# https://github.com/zhanghe9704/tpsa
+# https://github.com/zhanghe9704/tpsa_sym
+ref/
+
+# Doxygen output
+doc/
+
+# Tooling / editor state
+.tokensave/
+.claude/
+.vscode/
+.idea/
+*.swp
+
+# Scratch artifacts
+_tmp_dirtest/
+.write_test_*
+da_output.txt
+
+# Compiled objects and libraries
+*.o
+*.a
+*.so
+*.so.*
+*.dll
+*.dylib
