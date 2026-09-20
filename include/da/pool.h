@@ -270,8 +270,10 @@ private:
 
     void destroy() noexcept {
         // Zero size_ FIRST so any lingering Pool::free() calls see size_==0
-        // and return early (no-op) — this is important for the pattern where
-        // da_clear() is called before local DAVectors go out of scope.
+        // and return early (no-op). NOTE: this only helps while the owning
+        // DAEnv object is still alive (e.g. a pool moved out of it). It does
+        // NOT make it safe to destroy a DAEnv that live DAVectors point at —
+        // reading size_ through a freed DAEnv is itself a use-after-free.
         size_    = 0;
         full_len_ = 0;
         delete[] block_;

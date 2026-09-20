@@ -242,3 +242,67 @@ TEST_CASE("CD FUNCTIONS (numeric)", "[numeric_cd]") {
         REQUIRE(da::compare_cd_with_file("cd_composition_da_1.txt", comap[1], eps));
     }
 }
+
+// ===========================================================================
+// Copying a DA vector while the order is temporarily lowered must truncate.
+// ad_copy used to ignore Layout::full_len(), which made inv_map treat every
+// map as purely linear.
+// ===========================================================================
+TEST_CASE("da_change_order truncates a copy", "[numeric_order]") {
+    da::da_init(5, 2, 1000);
+    // Every vector lives in an inner scope: da_clear() destroys the env, so no
+    // DAVector may outlive it (see test_multienv.cc).
+    {
+        NDA x = da::base[0];
+        NDA y = da::base[1];
+        NDA v = 2.0 * x + 0.3 * y + 0.1 * x * x + 0.05 * x * y;
+
+        da::da_change_order(1);
+        NDA linear = v;             // keeps only the linear terms
+        da::da_restore_order();
+
+        REQUIRE(NDA::order() == 5);
+
+        NDA nonlinear = v - linear;
+        REQUIRE(nonlinear.norm() > 1e-12);                  // quadratic part survives
+
+        std::vector<int> c(2, 0);
+        c[0] = 2;
+        REQUIRE(std::fabs(nonlinear.element(c) - 0.1) < 1e-14);
+        c[0] = 1; c[1] = 1;
+        REQUIRE(std::fabs(nonlinear.element(c) - 0.05) < 1e-14);
+        c[0] = 1; c[1] = 0;
+        REQUIRE(std::fabs(nonlinear.element(c)) < 1e-14);   // linear part removed
+    }
+    da::da_clear();
+}
+
+// ===========================================================================
+// inv_map: the inverse composed with the original map is the identity.
+// ===========================================================================
+TEST_CASE("inv_map inverts a nonlinear map", "[numeric_inv]") {
+    da::da_init(5, 2, 1000);
+    {
+        NDA x = da::base[0];
+        NDA y = da::base[1];
+
+        std::vector<NDA> map = { 2.0 * x + 0.3 * y + 0.1 * x * x + 0.05 * x * y,
+                                -0.4 * x + 1.5 * y + 0.2 * y * y };
+        std::vector<NDA> inv(2);
+        da::inv_map(map, 2, inv);
+
+        std::vector<NDA> composed(2);
+        da::da_composition(map, inv, composed);
+        for (int i = 0; i < 2; ++i) {
+            NDA residual = composed[i] - da::base[i];
+            REQUIRE(residual.norm() < 1e-12);
+        }
+
+        da::da_composition(inv, map, composed);         // other direction too
+        for (int i = 0; i < 2; ++i) {
+            NDA residual = composed[i] - da::base[i];
+            REQUIRE(residual.norm() < 1e-12);
+        }
+    }
+    da::da_clear();
+}

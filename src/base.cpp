@@ -155,8 +155,10 @@ static void _inv_matrix(std::vector<std::vector<double>>& a, const int n,
 void inv_map(std::vector<NDA>& ivecs, int dim, std::vector<NDA>& ovecs)
 {
     assert(dim <= NDA::dim() && "Wrong dimension of map in inv_map!");
+    // Note: the reference writes "v.con() < min()", which is satisfied by any
+    // negative constant part; the magnitude is what must be zero.
     for (auto& v : ivecs)
-        assert(v.con() < std::numeric_limits<double>::min() &&
+        assert(std::fabs(v.con()) < std::numeric_limits<double>::min() &&
                "Constant part of the input map is NOT zero in inv_map!");
 
     std::vector<std::vector<double>> lin_matrix(dim, std::vector<double>(dim));
@@ -169,7 +171,6 @@ void inv_map(std::vector<NDA>& ivecs, int dim, std::vector<NDA>& ovecs)
         }
     }
 
-    unsigned int da_order = static_cast<unsigned int>(NDA::order());
     std::vector<NDA> nlin_map;
     for (auto& v : ivecs) {
         da_change_order(1);

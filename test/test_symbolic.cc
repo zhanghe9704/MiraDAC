@@ -550,13 +550,16 @@ TEST_CASE("SDA INTEROP") {
     }
 
     SECTION("mixed op NDA+SDA cross-env throws") {
-        // Create a separate env
+        // Create a separate env (da_make_env owns nothing; caller must delete)
         da::DAEnv& env2 = da::da_make_env(3u, 2u, 100u, false);
         da::da_select_env(env2);
-        NDA n2;  // in env2
-        da::da_select_env(da::da_current_env()); // tricky: go back to original
-        // Actually set up env properly
-        da::da_init(4u, 2u, 400u, true); // re-init main env
+        {
+            NDA n2;  // in env2; destroyed before env2 is deleted
+            REQUIRE(n2.env_ == &env2);
+        }
+        da::da_init(4u, 2u, 400u, true); // re-init and select the main env
+        delete &env2;
+
         NDA n_main = 1.0 + b[0];
         Expression sx("zz");
         SDA s_main = sx + b[1];

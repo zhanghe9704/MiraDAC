@@ -85,7 +85,12 @@ if [ "$RUN_TESTS" = "1" ]; then
     [ -n "$SYMENGINE_DIR" ] && RUNTIME_LIBS="$(cd "$SYMENGINE_DIR/../.." && pwd)/lib:$RUNTIME_LIBS"
     [ -n "$GMP_PREFIX" ] && RUNTIME_LIBS="$GMP_PREFIX/lib:$GMP_PREFIX/lib/x86_64-linux-gnu:$RUNTIME_LIBS"
   fi
-  ( cd "$ROOT/test" && LD_LIBRARY_PATH="$RUNTIME_LIBS${LD_LIBRARY_PATH:-}" "$ROOT/$BUILD_DIR/test/run_tests" )
+  # BUILD_DIR may be absolute or relative to the invocation directory.
+  case "$BUILD_DIR" in
+    /*) TEST_BIN="$BUILD_DIR/test/run_tests" ;;
+    *)  TEST_BIN="$(cd "$BUILD_DIR" && pwd)/test/run_tests" ;;
+  esac
+  ( cd "$ROOT/test" && LD_LIBRARY_PATH="$RUNTIME_LIBS${LD_LIBRARY_PATH:-}" "$TEST_BIN" )
 fi
 
 echo "==> done."

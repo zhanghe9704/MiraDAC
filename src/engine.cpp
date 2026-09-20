@@ -193,10 +193,17 @@ unsigned ad_pow_int_pos_impl(Layout& layout, Pool<T>& pool,
 // ad_copy
 // ===========================================================================
 template<class T>
-void ad_copy(Layout& /*layout*/, Pool<T>& pool, unsigned isrc, unsigned idst)
+void ad_copy(Layout& layout, Pool<T>& pool, unsigned isrc, unsigned idst)
 {
     if (isrc == idst) return;
     unsigned len = pool.len(isrc);
+    // Honor a temporarily lowered order (da_change_order). The reference
+    // copies FULL_VEC_LEN elements, so a copy made while the order is
+    // reduced keeps only the terms up to that order. Without this clamp,
+    // "da_change_order(1); t = v; da_restore_order();" does not truncate,
+    // and callers such as inv_map see an all-zero nonlinear part.
+    const unsigned cap = layout.full_len();
+    if (len > cap) len = cap;
     pool.copy_slot(pool.slot(isrc), pool.slot(idst), len);
     pool.set_len(idst, len);
 }
