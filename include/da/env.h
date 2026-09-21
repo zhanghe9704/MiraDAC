@@ -211,6 +211,14 @@ inline bool same_env(const DAEnv* a, const DAEnv* b) noexcept {
  * The check is compiled-in only when DA_CHECK_ENV != 0.
  * When DA_CHECK_ENV == 0 the function is a no-op.
  */
+// Default the guard ON when nothing defined it. The build system passes
+// DA_CHECK_ENV as a PUBLIC definition, but code compiled with a bare
+// -Iinclude would otherwise get DA_CHECK_ENV == 0 from the preprocessor's
+// "an undefined identifier evaluates to 0" rule and silently lose the check.
+#ifndef DA_CHECK_ENV
+#define DA_CHECK_ENV 1
+#endif
+
 inline void check_env(const DAEnv* a, const DAEnv* b) {
 #if DA_CHECK_ENV
     if (a != b) {

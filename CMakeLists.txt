@@ -9,12 +9,16 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(WITH_SYMBOLIC "Build symbolic (SDA) support" ON)
 set(DA_CHECK_ENV 1 CACHE STRING "Enable env guard (1=on, 0=off)")
 
-add_compile_definitions(DA_CHECK_ENV=${DA_CHECK_ENV})
+# NOTE: DA_CHECK_ENV and DA_WITH_SYMBOLIC are applied below as PUBLIC compile
+# definitions on the library targets, NOT with add_compile_definitions().
+# add_compile_definitions() is build-tree only: it is not exported as a usage
+# requirement, so a downstream find_package(da) consumer compiled the headers
+# with the env guard silently disabled and — for a symbolic install — with a
+# DAEnv missing pool_e_ (256 bytes instead of 352), an ODR/ABI mismatch.
 
 # --- Symbolic support ---
 if(WITH_SYMBOLIC)
     find_package(SymEngine REQUIRED CONFIG)
-    add_compile_definitions(DA_WITH_SYMBOLIC)
     set(DA_SYMENGINE_INCLUDES ${SYMENGINE_INCLUDE_DIRS})
     set(DA_SYMENGINE_LIBS ${SYMENGINE_LIBRARIES})
 else()
@@ -48,6 +52,10 @@ set_target_properties(daShared PROPERTIES
     VERSION   ${PROJECT_VERSION}
     SOVERSION ${PROJECT_VERSION_MAJOR}
 )
+target_compile_definitions(daShared PUBLIC DA_CHECK_ENV=${DA_CHECK_ENV})
+if(WITH_SYMBOLIC)
+    target_compile_definitions(daShared PUBLIC DA_WITH_SYMBOLIC)
+endif()
 
 # --- Static library ---
 add_library(daStatic STATIC ${DA_SOURCES})
@@ -59,6 +67,10 @@ target_include_directories(daStatic
 )
 if(WITH_SYMBOLIC)
     target_link_libraries(daStatic PUBLIC ${DA_SYMENGINE_LIBS})
+endif()
+target_compile_definitions(daStatic PUBLIC DA_CHECK_ENV=${DA_CHECK_ENV})
+if(WITH_SYMBOLIC)
+    target_compile_definitions(daStatic PUBLIC DA_WITH_SYMBOLIC)
 endif()
 
 # --- Install rules ---

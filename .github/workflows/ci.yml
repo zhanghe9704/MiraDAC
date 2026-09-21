@@ -41,6 +41,13 @@ jobs:
           test -f "$PWD/_install/lib/cmake/da/daConfig.cmake"
           find "$PWD/_install" -maxdepth 3 -name 'libda*' -o -name 'da.h'
 
+      - name: Consumer smoke-test (exported compile definitions)
+        run: |
+          cmake -S test/consumer -B build-consumer \
+            -Dda_DIR="$PWD/_install/lib/cmake/da"
+          cmake --build build-consumer -j2
+          ./build-consumer/consumer_smoke
+
   symbolic:
     name: Symbolic (WITH_SYMBOLIC=ON, SymEngine via conda-forge)
     runs-on: ubuntu-latest
@@ -70,3 +77,17 @@ jobs:
             --symengine-dir "$CONDA_PREFIX/lib/cmake/symengine" \
             --gmp-dir "$CONDA_PREFIX" \
             --build-dir build-on --jobs 2
+
+      - name: Tests under AddressSanitizer (leak detection on)
+        run: |
+          cmake --build build-on --target run_tests_asan -j2
+          cd test && ASAN_OPTIONS=detect_leaks=1 ../build-on/test/run_tests_asan
+
+      - name: Consumer smoke-test (symbolic install)
+        run: |
+          cmake --install build-on --prefix "$PWD/_install_on"
+          cmake -S test/consumer -B build-consumer-on \
+            -Dda_DIR="$PWD/_install_on/lib/cmake/da" \
+            -DSymEngine_DIR="$CONDA_PREFIX/lib/cmake/symengine"
+          cmake --build build-consumer-on -j2
+          ./build-consumer-on/consumer_smoke
