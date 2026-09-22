@@ -1,4 +1,4 @@
-# MiraDAC — Unified Numerical and Symbolic Differential Algebra
+# MiraDAC — Unified Numerical and Symbolic Differential Algebra in C++
 
 MiraDAC is a C++17 library for Truncated Power Series Algebra (TPSA) / Differential Algebra (DA).
 It provides a single templated engine that supports:
