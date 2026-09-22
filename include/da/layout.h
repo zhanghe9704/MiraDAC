@@ -129,6 +129,15 @@ public:
     /// Restore the order to the value before the last change_order() call.
     void restore_order();
 
+    /**
+     * @brief Free the monomial tables, keeping the object usable-but-empty.
+     *
+     * Idempotent. Used by DAEnv::release_memory() to drop the large
+     * prdidx/base/order_index allocations when an environment is retired
+     * while DAVectors may still reference it.
+     */
+    void release_tables() noexcept { free_tables(); }
+
 private:
     // ------------------------------------------------------------------ //
     //  Internal helpers                                                    //
@@ -155,7 +164,11 @@ private:
 
     unsigned int*  order_index_;   ///< [gnd+2]
     unsigned int*  base_;          ///< [gnv * FULL_VEC_LEN]  (cumulative encoding)
-    unsigned int** prdidx_;        ///< [FULL_VEC_LEN], prdidx_[0]==nullptr
+    unsigned int** prdidx_;        ///< [prdidx_rows_], prdidx_[0]==nullptr
+    /// Rows allocated in prdidx_. Fixed at construction: FULL_VEC_LEN_ is
+    /// lowered by change_order(), so freeing against it would leak the rows
+    /// above the reduced order.
+    unsigned int   prdidx_rows_;
     unsigned int   tblsize_;       ///< Total entries in prdidx (for diagnostics)
 
     std::vector<std::vector<unsigned int>> H_;  ///< [gnv+1][gnd+2]

@@ -26,6 +26,30 @@ DAEnv::DAEnv(unsigned order, unsigned num_vars, unsigned pool_size, bool table)
 }
 
 // ======================================================================
+// Retirement
+// ======================================================================
+
+unsigned DAEnv::live_slots() const noexcept {
+    unsigned n = pool_d_.count();
+#ifdef DA_WITH_SYMBOLIC
+    n += pool_e_.count();
+#endif
+    return n;
+}
+
+void DAEnv::release_memory() noexcept {
+    // Release the Expression pool while SymEngine is still initialized.
+    // Doing it here, rather than leaving it to static destruction, is what
+    // keeps the retired shells inert at process exit.
+#ifdef DA_WITH_SYMBOLIC
+    pool_e_.release();
+#endif
+    pool_d_.release();          // sets poolsize() to 0; free() becomes a no-op
+    layout_.release_tables();   // the large prdidx / base / order_index blocks
+    retired_ = true;
+}
+
+// ======================================================================
 // import<T>: same-type same-layout slot copy
 // ======================================================================
 
@@ -97,6 +121,20 @@ thread_local DAEnv* tl_current_env = nullptr;
 // da_clear() clears the default env (the last one created by da_init).
 static std::unique_ptr<DAEnv> default_env;
 
+// Environments cleared while DAVectors still referenced them.
+// release_memory() has already handed back everything they held, so each
+// entry is an empty shell (a few hundred bytes) kept valid until process
+// exit. Owning them here rather than leaking them keeps ASan runs clean.
+std::vector<std::unique_ptr<DAEnv>>& retired_envs() {
+    static std::vector<std::unique_ptr<DAEnv>> envs;
+    return envs;
+}
+
+void retire(std::unique_ptr<DAEnv> env) {
+    env->release_memory();
+    retired_envs().push_back(std::move(env));
+}
+
 } // anonymous namespace
 
 DAEnv& da_current_env() {
@@ -134,17 +172,35 @@ DAEnv& da_make_env(unsigned order, unsigned num_vars,
 
 int da_init_env_only(unsigned order, unsigned num_vars,
                      unsigned pool_size, bool table) {
+    // Re-initializing drops the previous default env, so it goes through the
+    // same retirement path as da_clear(); otherwise DAVectors still pointing
+    // at the old env would be left dangling.
+    da_clear_env_only();
     default_env = std::make_unique<DAEnv>(order, num_vars, pool_size, table);
     tl_current_env = default_env.get();
     return 0;
 }
 
 void da_clear_env_only() {
-    if (default_env) {
-        if (tl_current_env == default_env.get()) {
-            tl_current_env = nullptr;
-        }
-        default_env.reset();
+    if (!default_env) return;
+    if (tl_current_env == default_env.get()) {
+        tl_current_env = nullptr;
+    }
+    if (default_env->live_slots() == 0) {
+        default_env.reset();              // nothing points at it: free it now
+    } else {
+        // DAVectors are still alive. Free this env's memory but keep the
+        // shell valid so their destructors can read poolsize() == 0.
+        retire(std::move(default_env));
+    }
+}
+
+void da_destroy_env(DAEnv& env) {
+    if (env.live_slots() == 0) {
+        delete &env;
+    } else {
+        env.release_memory();
+        retired_envs().emplace_back(&env);
     }
 }
 

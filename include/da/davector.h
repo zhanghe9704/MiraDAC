@@ -121,12 +121,14 @@ struct DAVector {
     //  Destructor — return the slot to the pool                              //
     // --------------------------------------------------------------------- //
     ~DAVector() {
-        // WARNING: a DAVector must be destroyed BEFORE the DAEnv it points
-        // at. da_clear() destroys the default env, so calling it while any
-        // vector is still in scope is a use-after-free — the poolsize()
-        // check below itself dereferences env_. That check only guards the
-        // env_ == nullptr case; it cannot detect an already-deleted env.
-        // See test/test_multienv.cc for the scoping convention.
+        // da_clear() (and da_destroy_env()) retire an environment that still
+        // has live vectors instead of deleting it: the shell stays valid with
+        // its pools released, so the poolsize() check below reads 0 and the
+        // free is skipped. That makes "clear, then let vectors go out of
+        // scope" safe, as it was in the reference library.
+        //
+        // Still unsafe: `delete &env` on a DAEnv that vectors reference.
+        // Use da_destroy_env() instead.
         if (env_ && env_->template pool<T>().poolsize() > 0)
             env_->template pool<T>().free(slot_);
     }

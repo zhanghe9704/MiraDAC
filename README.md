@@ -15,6 +15,8 @@ Both flavors share one memory-pooled, monomial-indexed engine; the only differen
 - RAII `Pool<T>` with O(1) free-list; no per-vector heap allocation.
 - Multiple independent `DAEnv`s (different order/nv) can coexist in one process.
 - Environment guard (`DA_CHECK_ENV`, default on) catches cross-environment operations at runtime.
+- `da_clear()` is safe to call while DA vectors are still in scope (see
+  [Environment lifetime](#environment-lifetime)).
 - Complex DA (`std::complex<NDA>`) and `cd_composition` ported from the numerical reference.
 - Math functions: `sqrt, exp, log, sin, cos, tan, asin, acos, atan, sinh, cosh, tanh, asinh, acosh, atanh, pow, abs, erf`.
 - Composition, substitution, derivative, integration, norm, zero-check.
@@ -221,6 +223,42 @@ The only constraints are the usual mathematical-domain conditions, checked symbo
 
 (Numeric-bound domain guards — e.g. the numerical `asin` requiring `|c0| <= 1` — apply to the
 `NDA` path, not `SDA`.)
+
+## Environment lifetime
+
+A `DAVector` holds a raw pointer to the `DAEnv` it was created in, so the
+environment has to stay readable for as long as the vector exists.
+
+`da_clear()` handles this for you. If any DA vector still references the
+default environment, the environment is **retired** rather than deleted: its
+pools and monomial tables are freed immediately, and the (now empty) `DAEnv`
+object is kept alive until the program exits, so the vectors' destructors
+remain valid. The same applies when `da_init()` is called a second time.
+
+```cpp
+da::da_init(6, 6, 2000);
+NDA x = base[0];
+NDA y = sqrt(1.0 + x);
+
+da::da_clear();     // fine: x and y are still in scope
+                    // their destructors run safely afterwards
+```
+
+Computing with a vector after its environment has been cleared is still
+invalid — the coefficient storage is gone. Only destruction is guaranteed.
+
+For environments created with `da_make_env()`, use `da_destroy_env()` rather
+than `delete`:
+
+```cpp
+da::DAEnv& env2 = da::da_make_env(4, 2, 500);
+// ... work in env2 ...
+da::da_destroy_env(env2);   // deletes it, or retires it if vectors remain
+```
+
+`delete &env2` is only correct when nothing references the environment any
+more; `da_destroy_env()` checks for you (`env.live_slots()` reports the
+count).
 
 ## API summary
 

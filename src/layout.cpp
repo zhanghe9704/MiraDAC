@@ -115,6 +115,7 @@ Layout::Layout(const MonomialScheme& scheme, bool build_order_table)
     , order_index_(nullptr)
     , base_(nullptr)
     , prdidx_(nullptr)
+    , prdidx_rows_(0)
     , tblsize_(0)
     , order_table_valid_(false)
 {
@@ -134,10 +135,13 @@ Layout::~Layout()
 void Layout::free_tables()
 {
     if (prdidx_) {
-        for (unsigned int i = 0; i < FULL_VEC_LEN_; ++i)
+        // Free against the allocated row count, not FULL_VEC_LEN_, which
+        // change_order() may have lowered since construction.
+        for (unsigned int i = 0; i < prdidx_rows_; ++i)
             delete[] prdidx_[i];
         delete[] prdidx_;
         prdidx_ = nullptr;
+        prdidx_rows_ = 0;
     }
     delete[] base_;
     base_ = nullptr;
@@ -154,6 +158,7 @@ Layout::Layout(Layout&& o) noexcept
     , order_index_(o.order_index_)
     , base_(o.base_)
     , prdidx_(o.prdidx_)
+    , prdidx_rows_(o.prdidx_rows_)
     , tblsize_(o.tblsize_)
     , H_(std::move(o.H_))
     , order_table_valid_(o.order_table_valid_)
@@ -163,6 +168,7 @@ Layout::Layout(Layout&& o) noexcept
     o.order_index_ = nullptr;
     o.base_        = nullptr;
     o.prdidx_      = nullptr;
+    o.prdidx_rows_ = 0;
     o.FULL_VEC_LEN_ = 0;
 }
 
@@ -178,6 +184,7 @@ Layout& Layout::operator=(Layout&& o) noexcept
         order_index_       = o.order_index_;
         base_              = o.base_;
         prdidx_            = o.prdidx_;
+        prdidx_rows_       = o.prdidx_rows_;
         tblsize_           = o.tblsize_;
         H_                 = std::move(o.H_);
         order_table_valid_ = o.order_table_valid_;
@@ -187,6 +194,7 @@ Layout& Layout::operator=(Layout&& o) noexcept
         o.order_index_ = nullptr;
         o.base_        = nullptr;
         o.prdidx_      = nullptr;
+        o.prdidx_rows_ = 0;
         o.FULL_VEC_LEN_ = 0;
     }
     return *this;
@@ -316,6 +324,7 @@ void Layout::init_prod_index()
     // Indices from order_index[nd] to fvl-1 correspond to highest-order monomials
     // whose products always exceed the truncation order -- they are set to nullptr.
     prdidx_ = new unsigned int*[fvl];
+    prdidx_rows_ = fvl;
     for (unsigned int i = 0; i < fvl; ++i) prdidx_[i] = nullptr;
 
     unsigned int ord = 1;

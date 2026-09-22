@@ -98,6 +98,35 @@ public:
     template<class T>
     unsigned import(const DAEnv& src_env, unsigned src_slot);
 
+    // ------------------------------------------------------------------ //
+    //  Retirement                                                          //
+    // ------------------------------------------------------------------ //
+
+    /**
+     * @brief Number of pool slots still held, across all coefficient types.
+     *
+     * At teardown time (no kernel running) this is the number of live
+     * DAVectors that still point at this environment.
+     */
+    unsigned live_slots() const noexcept;
+
+    /**
+     * @brief Release the pools and monomial tables, keeping the object alive.
+     *
+     * A DAVector must not outlive its DAEnv: ~DAVector reads poolsize()
+     * through env_, so destroying the environment first is a use-after-free.
+     * The reference library kept its pool in never-destroyed globals, so
+     * clearing before a vector went out of scope was harmless there.
+     *
+     * Retiring restores that property. Everything expensive is freed here,
+     * while SymEngine is still initialized, and the empty shell stays valid
+     * so late destructors read poolsize() == 0 and skip their free().
+     */
+    void release_memory() noexcept;
+
+    /// True once release_memory() has run.
+    bool retired() const noexcept { return retired_; }
+
 #ifdef DA_WITH_SYMBOLIC
     /**
      * @brief Promote a double slot to a SymEngine::Expression slot.
@@ -116,6 +145,7 @@ private:
 #ifdef DA_WITH_SYMBOLIC
     Pool<SymEngine::Expression> pool_e_;
 #endif
+    bool          retired_ = false;
 };
 
 // ---------------------------------------------------------------------- //
@@ -160,6 +190,16 @@ void da_select_env(DAEnv& env);
  */
 DAEnv& da_make_env(unsigned order, unsigned num_vars,
                    unsigned pool_size, bool table = false);
+
+/**
+ * @brief Destroy an environment returned by da_make_env().
+ *
+ * Prefer this over `delete &env`. If no DAVector still references env, it
+ * is deleted outright. If some do, env is retired instead (see
+ * DAEnv::release_memory()): its memory is freed now and the empty shell is
+ * kept until process exit, so those vectors' destructors stay valid.
+ */
+void da_destroy_env(DAEnv& env);
 
 // ======================================================================
 // Classic single-environment entry points

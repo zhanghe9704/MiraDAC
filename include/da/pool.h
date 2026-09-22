@@ -247,12 +247,24 @@ public:
     /**
      * @brief Number of slots currently in use (total - remaining).
      */
-    unsigned count() const { return size_ - remain(); }
+    unsigned count() const { return size_ == 0 ? 0u : size_ - remain(); }
+
+    /**
+     * @brief Release the block and mark the pool empty, keeping the object.
+     *
+     * After this, poolsize() == 0 and free() is a no-op, so a DAVector whose
+     * environment has been retired can still run its destructor safely.
+     * Used by DAEnv::release_memory(); see the retirement note in env.h.
+     */
+    void release() noexcept { destroy(); }
 
     /**
      * @brief Number of free slots remaining (walks the free-list).
      */
     unsigned remain() const {
+        // An empty or released pool has no free-list to walk; free_[tail_]
+        // would be an out-of-bounds read.
+        if (size_ == 0 || free_.empty()) return 0;
         unsigned cnt  = 0;
         unsigned cur  = head_;
         unsigned sentinel = free_[tail_];
@@ -270,10 +282,10 @@ private:
 
     void destroy() noexcept {
         // Zero size_ FIRST so any lingering Pool::free() calls see size_==0
-        // and return early (no-op). NOTE: this only helps while the owning
-        // DAEnv object is still alive (e.g. a pool moved out of it). It does
-        // NOT make it safe to destroy a DAEnv that live DAVectors point at —
-        // reading size_ through a freed DAEnv is itself a use-after-free.
+        // and return early (no-op). This is what makes a retired DAEnv safe
+        // for late ~DAVector calls (see DAEnv::release_memory). It only works
+        // because the DAEnv object itself is kept alive — reading size_
+        // through a deleted DAEnv would still be a use-after-free.
         size_    = 0;
         full_len_ = 0;
         delete[] block_;

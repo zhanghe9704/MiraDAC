@@ -341,3 +341,85 @@ TEST_CASE("da_make_env lifecycle: two heap envs, switch, delete", "[multienv]") 
     // No vectors reference the default env now -> safe to clear.
     da::da_clear();
 }
+
+// ===========================================================================
+// 8. Environment retirement
+//
+// da_clear() used to delete the default DAEnv outright, while ~DAVector
+// reads poolsize() through env_. Any vector still in scope at that point
+// was a use-after-free. da_clear() now retires an env that still has live
+// vectors: its memory is released, the shell stays valid, and the late
+// destructors see poolsize() == 0. Run these under ASan.
+// ===========================================================================
+
+TEST_CASE("da_clear with live vectors is safe", "[multienv][retire]") {
+    da::da_init(4, 2, 500);
+
+    da::NDA x = da::base[0];
+    da::NDA y = 1.0 + da::base[1];
+    da::NDA z = x * y;
+    REQUIRE(z.n_element() > 0);
+
+    da::da_clear();                 // x, y, z are still in scope
+
+    // Their destructors run at the end of this TEST_CASE, against the
+    // retired env. Nothing here may touch the released pool.
+}
+
+TEST_CASE("re-init with live vectors is safe", "[multienv][retire]") {
+    da::da_init(4, 2, 500);
+    da::NDA old_vec = 1.0 + da::base[0];
+    da::DAEnv* first = &da::da_current_env();
+
+    da::da_init(3, 2, 200);         // replaces the default env
+    REQUIRE(&da::da_current_env() != first);
+
+    {
+        da::NDA fresh = 2.0 + da::base[0];
+        REQUIRE(fresh.env_ == &da::da_current_env());
+        REQUIRE(old_vec.env_ == first);   // still points at the retired env
+    }
+
+    da::da_clear();                 // old_vec is still alive here too
+}
+
+TEST_CASE("live_slots reports outstanding vectors", "[multienv][retire]") {
+    da::da_init(4, 2, 500);
+    da::DAEnv& env = da::da_current_env();
+
+    // da_init created the base vectors, so start from that baseline.
+    unsigned base_slots = env.live_slots();
+    {
+        da::NDA a, b, c;
+        REQUIRE(env.live_slots() == base_slots + 3);
+    }
+    REQUIRE(env.live_slots() == base_slots);
+    REQUIRE_FALSE(env.retired());
+
+    da::da_clear();
+}
+
+TEST_CASE("da_destroy_env handles both cases", "[multienv][retire]") {
+    da::da_init(4, 2, 500);
+    da::DAEnv* main_env = &da::da_current_env();
+
+    SECTION("no live vectors: env is deleted") {
+        da::DAEnv& env2 = da::da_make_env(3, 2, 100);
+        { da::NDA v; REQUIRE(v.env_ == &env2); }
+        da::da_select_env(*main_env);
+        da::da_destroy_env(env2);          // nothing references it
+    }
+
+    SECTION("live vectors: env is retired, not deleted") {
+        da::DAEnv& env2 = da::da_make_env(3, 2, 100);
+        da::NDA v;                          // deliberately outlives the call
+        REQUIRE(v.env_ == &env2);
+        da::da_select_env(*main_env);
+        da::da_destroy_env(env2);
+        REQUIRE(env2.retired());            // shell still readable
+        REQUIRE(env2.live_slots() == 0);    // pool released
+    }                                       // v destroyed here, safely
+
+    da::da_select_env(*main_env);
+    da::da_clear();
+}
