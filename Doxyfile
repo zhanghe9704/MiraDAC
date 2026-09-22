@@ -4,7 +4,7 @@
 
 PROJECT_NAME           = "da"
 PROJECT_NUMBER         = 1.0.0
-PROJECT_BRIEF          = "MiraDAC — unified numerical (NDA) and symbolic (SDA) Differential Algebra library"
+PROJECT_BRIEF          = "MiraDAC is a unified numerical (NDA) and symbolic (SDA) Differential Algebra library"
 
 OUTPUT_DIRECTORY       = doc/doxygen
 
