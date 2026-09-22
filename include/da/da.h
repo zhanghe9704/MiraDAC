@@ -233,7 +233,22 @@ inline std::complex<DAVector<T>> operator/(const std::complex<DAVector<T>>& a, c
 // ===========================================================================
 using CNDA = std::complex<NDA>;
 #ifdef DA_WITH_SYMBOLIC
-/// @brief Symbolic complex DA vector: real+imaginary pair of SDA.
+/**
+ * @brief Symbolic complex DA vector: real+imaginary pair of SDA.
+ *
+ * This is the supported way to do complex arithmetic with symbolic DA.
+ * The imaginary unit belongs in this std::complex wrapper, never inside a
+ * coefficient: an SDA holding SymEngine::I compiles and looks plausible, but
+ * the real and imaginary parts can no longer be separated, evaluate() cannot
+ * convert it back to an NDA (SymEngine raises "Not Implemented", since NDA
+ * coefficients are double), and mixing the two representations double-counts
+ * the imaginary unit.
+ *
+ * @note The complex function set matches CNDA and ref/tpsa exactly:
+ *       exp, sqrt, log, asin, acos, atan, asinh, acosh, atanh, pow, abs.
+ *       There are deliberately no complex sin/cos/tan/sinh/cosh/tanh
+ *       overloads; the scalar SDA versions do exist.
+ */
 using CSDA = std::complex<SDA>;
 #endif
 

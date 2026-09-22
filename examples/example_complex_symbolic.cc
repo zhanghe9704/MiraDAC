@@ -8,6 +8,11 @@
  *   - Separating real/imaginary parts.
  *   - Evaluating the symbolic result to a CNDA at concrete numeric values.
  *
+ * CSDA is the supported representation for complex symbolic DA: the
+ * imaginary unit lives in the std::complex wrapper, so real and imaginary
+ * parts stay separable and evaluate() can return a CNDA. Do not put
+ * SymEngine::I inside an SDA coefficient — see the CSDA alias in da/da.h.
+ *
  * Build (symbolic): cmake ... -DWITH_SYMBOLIC=ON && cmake --build ...
  *
  * Stage C6 per DEVELOPMENT_PLAN_COMPLEX_SYMBOLIC.md.

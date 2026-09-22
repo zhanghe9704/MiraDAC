@@ -328,6 +328,11 @@ inline std::complex<SDA> promote(const std::complex<NDA>& src) {
  * @brief Evaluate a symbolic complex DA vector at given symbol values, producing a complex<NDA>.
  *
  * Evaluates both real and imaginary parts via evaluate(SDA, map) -> NDA.
+ *
+ * @note This is why complex symbolic work belongs in CSDA rather than in
+ *       SymEngine::I inside coefficients: each part must evaluate to a real
+ *       double. An SDA carrying I makes SymEngine raise "Not Implemented"
+ *       here. See the CSDA alias in da.h.
  */
 inline std::complex<NDA> evaluate(const std::complex<SDA>& src,
                                    const SymEngine::map_basic_basic& values) {

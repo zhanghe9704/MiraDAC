@@ -145,6 +145,21 @@ da_clear();
 DA map as a **real + imaginary pair of symbolic DA vectors**. This mirrors the numerical
 `da::CNDA = std::complex<da::NDA>` but with `SymEngine::Expression` coefficients.
 
+> **`CSDA` is the supported way to do complex arithmetic with symbolic DA.** Keep the imaginary
+> unit in the `std::complex` wrapper, never inside a coefficient.
+>
+> SymEngine has its own imaginary unit (`SymEngine::I`), and putting it in an `SDA` coefficient
+> will compile and produce plausible-looking results. It is **not supported**, for three reasons:
+>
+> - Real and imaginary parts can no longer be separated, which is the whole point of a complex
+>   DA map (and the reason this design was chosen over SymEngine-native complex numbers).
+> - `evaluate()` cannot convert such a vector back to numbers — `NDA` coefficients are `double`,
+>   so SymEngine raises `Not Implemented`.
+> - Mixing the two, e.g. an `I` buried in the real part of a `CSDA`, double-counts the imaginary
+>   unit. This is untested and produces wrong answers.
+>
+> Pick one representation per computation, and let it be `CSDA`.
+
 ### Quick start
 
 ```cpp
@@ -201,6 +216,14 @@ da::cd_composition(maps_in, maps_sub, maps_out);
 | `cd_composition` (all 3 overloads) | Yes |
 | `promote(CNDA)` → `CSDA` | Yes |
 | `evaluate(CSDA, map)` → `CNDA` | Yes |
+| `sin`, `cos`, `tan`, `sinh`, `cosh`, `tanh` | **No** — see below |
+| `SymEngine::I` inside a coefficient | **Not supported** — use `CSDA` |
+
+The trigonometric and hyperbolic functions are not defined for complex DA in either flavor:
+`CSDA` here has exactly the same function set as the numerical `CNDA`, which in turn matches
+`ref/tpsa`. The scalar versions (`sin(SDA)`, `cos(SDA)`, …) do exist — only the
+`std::complex<...>` overloads are absent. If you need them, build them from `exp`:
+`sin(z) = (exp(i·z) - exp(-i·z)) / 2i`.
 
 ### Correctness model
 
