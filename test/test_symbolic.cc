@@ -568,4 +568,37 @@ TEST_CASE("SDA INTEROP") {
     }
 }
 
+// ===========================================================================
+// erf(SDA) must not depend on the default env's global da::base
+// ===========================================================================
+TEST_CASE("SDA erf works in a non-default env", "[symbolic][multienv]") {
+    Expression sx("x"), sy("y");
+    auto erf_in_current_env = [&](std::vector<double>& out) {
+        NDA v0 = da::da_base(0), v1 = da::da_base(1);
+        SDA s0 = da::promote(v0), s1 = da::promote(v1);
+        SDA sv;
+        REQUIRE_NOTHROW(sv = da::erf(sx + s0 * s0 + sy * s1));
+        REQUIRE(sv.env_ == v0.env_);
+        SymEngine::vec_basic vars{sx.get_basic(), sy.get_basic()};
+        NDA r = da::evaluate(sv, vars, std::vector<double>{0.3, -0.7});
+        out.clear();
+        for (int i = 0; i < da::da_full_length(); ++i) out.push_back(r.element(i));
+    };
+
+    std::vector<double> ref, got;
+    da::da_init(5u, 2u, 400u, true);
+    da::DAEnv* main_env = &da::da_current_env();
+    erf_in_current_env(ref);
+
+    da::DAEnv& env2 = da::da_make_env(5u, 2u, 400u, true);   // same layout, other env
+    erf_in_current_env(got);
+    REQUIRE(got.size() == ref.size());
+    for (std::size_t i = 0; i < ref.size(); ++i)
+        REQUIRE(std::fabs(got[i] - ref[i]) < 1e-13);
+
+    da::da_select_env(*main_env);
+    da::da_destroy_env(env2);
+    da::da_clear();
+}
+
 #endif // DA_WITH_SYMBOLIC

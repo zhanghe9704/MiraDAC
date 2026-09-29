@@ -785,9 +785,9 @@ SDA erf(const SDA& v) {
     E cons = v.con();
 
     // Build SDA base variable for variable 0: constant cons, linear term 1
-    // This mirrors da[0] in the reference (the 0-th base vector)
-    // We build: dal = cons + base[0]  where base[0] is the first NDA base vector
-    SDA da0 = cons + da::base[0];   // Expression + NDA -> SDA via interop.h
+    // This mirrors da[0] in the reference (the 0-th base vector), built in the
+    // current env rather than taken from the default env's global da::base.
+    SDA da0 = cons + da_base(0);    // Expression + NDA -> SDA via interop.h
     SDA dal = exp(-1.0 * da0 * da0);
     dal = da_int(dal, 0u);
     SDA ada = v - cons;             // SDA - Expression

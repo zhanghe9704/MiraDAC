@@ -1427,7 +1427,7 @@ void ad_substitute(Layout& layout, Pool<T>& pool,
                                 std::swap(product, tmp_slot);
                             }
                         }
-                        layout.restore_order();
+                        layout.change_order(gnd);   // back to the caller's order
                         product_flag = false;
                     }
                     ad_mult_c(layout, pool, product, coef, tmp_slot);

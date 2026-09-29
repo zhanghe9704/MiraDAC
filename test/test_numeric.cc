@@ -306,3 +306,77 @@ TEST_CASE("inv_map inverts a nonlinear map", "[numeric_inv]") {
     }
     da::da_clear();
 }
+
+// ===========================================================================
+// Library functions that lower the order internally must hand back the order
+// the caller had set, not the order given to da_init.
+// ===========================================================================
+TEST_CASE("inv_map keeps a caller-lowered order", "[numeric_order]") {
+    da::da_init(5, 2, 1000);
+    {
+        NDA x = da::base[0];
+        NDA y = da::base[1];
+        std::vector<NDA> map = { 2.0 * x + 0.3 * y + 0.1 * x * x,
+                                -0.4 * x + 1.5 * y + 0.2 * y * y };
+        da::da_change_order(3);
+        std::vector<NDA> inv(2);
+        da::inv_map(map, 2, inv);
+        REQUIRE(da::da_current_env().layout().max_order() == 3);
+        da::da_restore_order();
+    }
+    da::da_clear();
+}
+
+TEST_CASE("da_composition keeps a caller-lowered order", "[numeric_order]") {
+    da::da_init(5, 2, 1000);
+    {
+        NDA x = da::base[0];
+        NDA y = da::base[1];
+        std::vector<NDA> f = { x + 0.5 * x * y + 0.2 * y * y * y, y - 0.3 * x * x };
+        std::vector<NDA> g = { 1.0 + x + 0.1 * y * y, 2.0 * y + 0.4 * x * y };
+
+        std::vector<NDA> full(2);
+        da::da_composition(f, g, full);       // at order 5
+
+        da::da_change_order(3);
+        std::vector<NDA> low(2);
+        da::da_composition(f, g, low);
+        REQUIRE(da::da_current_env().layout().max_order() == 3);
+
+        // Expected: the order-5 result truncated to order 3.
+        for (int i = 0; i < 2; ++i) {
+            NDA expected = full[i];           // copy truncates at the current order
+            REQUIRE(da::compare_da_vectors(expected, low[i], 1e-14));
+        }
+        da::da_restore_order();
+    }
+    da::da_clear();
+}
+
+TEST_CASE("multi-base da_substitute keeps a caller-lowered order", "[numeric_order]") {
+    da::da_init(5, 2, 1000);
+    {
+        NDA x = da::base[0];
+        NDA y = da::base[1];
+        std::vector<NDA> f = { x + 0.5 * x * y + 0.2 * y * y * y, y - 0.3 * x * x };
+        // Substitute base 0 only: terms that keep y take the internal
+        // lower-order product path in ad_substitute.
+        std::vector<unsigned int> idx{0};
+        std::vector<NDA> g = { x + 0.1 * y * y + 0.3 * x * y };
+
+        std::vector<NDA> full(2);
+        da::da_substitute(f, idx, g, full);   // at order 5
+
+        da::da_change_order(3);
+        std::vector<NDA> low(2);
+        da::da_substitute(f, idx, g, low);
+        REQUIRE(da::da_current_env().layout().max_order() == 3);
+
+        for (int i = 0; i < 2; ++i) {
+            NDA expected = full[i];           // copy truncates at the current order
+            REQUIRE(da::compare_da_vectors(expected, low[i], 1e-14));
+        }
+        da::da_restore_order();
+    }
+    da::da_clear();
+}

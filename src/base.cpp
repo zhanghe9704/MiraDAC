@@ -58,6 +58,12 @@ void Base::set_base(unsigned int n) {
     }
 }
 
+NDA da_base(unsigned int i) {
+    NDA v;
+    detail::ad_var(v.env_->layout(), v.env_->pool<double>(), v.slot_, 0.0, i);
+    return v;
+}
+
 void Base::set_base() {
     set_base(static_cast<unsigned int>(NDA::dim()));
 }
@@ -171,14 +177,23 @@ void inv_map(std::vector<NDA>& ivecs, int dim, std::vector<NDA>& ovecs)
         }
     }
 
+    // Restore the caller's order, not the original one: restore_order() would
+    // discard an order the caller lowered with da_change_order().
+    Layout& layout = da_current_env().layout();
+    const unsigned int caller_order = layout.max_order();
     std::vector<NDA> nlin_map;
     for (auto& v : ivecs) {
-        da_change_order(1);
+        layout.change_order(1);
         NDA t = v;
-        da_restore_order();
+        layout.change_order(caller_order);
         t = v - t;
         nlin_map.push_back(t);
     }
+
+    // Base vectors of the current env (the global da::base belongs to the
+    // default env only).
+    std::vector<NDA> bases;
+    for (int j = 0; j < dim; ++j) bases.push_back(da_base(static_cast<unsigned int>(j)));
 
     std::vector<std::vector<double>> inv_lin_matrix(dim, std::vector<double>(dim));
     _inv_matrix(lin_matrix, dim, inv_lin_matrix);
@@ -188,7 +203,7 @@ void inv_map(std::vector<NDA>& ivecs, int dim, std::vector<NDA>& ovecs)
         NDA t(0.0);
         for (int j = 0; j < dim; ++j) {
             if (std::fabs(inv_lin_matrix[i][j]) > 1e-16)
-                t = t + inv_lin_matrix[i][j] * base[j];
+                t = t + inv_lin_matrix[i][j] * bases[j];
         }
         inv_lin_map.push_back(t);
     }
@@ -200,7 +215,7 @@ void inv_map(std::vector<NDA>& ivecs, int dim, std::vector<NDA>& ovecs)
     for (int i = 0; i < NDA::order() + 1; ++i) {
         da_composition(nlin_map, tmp_ovecs, tmp);
         for (int j = 0; j < dim; ++j)
-            tmp_ovecs[j] = base[j] - tmp[j];
+            tmp_ovecs[j] = bases[j] - tmp[j];
         da_composition(inv_lin_map, tmp_ovecs, tmp);
         for (int j = 0; j < dim; ++j)
             tmp_ovecs[j] = tmp[j];

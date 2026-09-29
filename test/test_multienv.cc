@@ -423,3 +423,36 @@ TEST_CASE("da_destroy_env handles both cases", "[multienv][retire]") {
     da::da_select_env(*main_env);
     da::da_clear();
 }
+
+// ============================================================================
+// Library functions must not depend on the default env's global da::base
+// ============================================================================
+
+static void check_inv_map_identity() {
+    da::NDA x = da::da_base(0);
+    da::NDA y = da::da_base(1);
+    std::vector<da::NDA> map = { 2.0 * x + 0.3 * y + 0.1 * x * x + 0.05 * x * y,
+                                -0.4 * x + 1.5 * y + 0.2 * y * y };
+    std::vector<da::NDA> inv(2), composed(2);
+    REQUIRE_NOTHROW(da::inv_map(map, 2, inv));
+    da::da_composition(map, inv, composed);
+    REQUIRE((composed[0] - x).norm() < 1e-12);
+    REQUIRE((composed[1] - y).norm() < 1e-12);
+}
+
+TEST_CASE("inv_map works in a non-default env", "[multienv][inv_map]") {
+    da::da_init(4, 3, 500);                   // default env: different layout
+    da::DAEnv* main_env = &da::da_current_env();
+    da::DAEnv& env2 = da::da_make_env(5, 2, 1000);   // selected as current
+    check_inv_map_identity();
+    da::da_select_env(*main_env);
+    da::da_destroy_env(env2);
+    da::da_clear();
+}
+
+TEST_CASE("inv_map works when no default env exists", "[multienv][inv_map]") {
+    da::da_clear();                           // global da::base is now empty
+    da::DAEnv& env2 = da::da_make_env(5, 2, 1000);
+    check_inv_map_identity();
+    da::da_destroy_env(env2);
+}

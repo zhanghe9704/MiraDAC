@@ -43,4 +43,13 @@ struct Base {
 /// Global bases accessor — da::base[i] gives the i-th DA base.
 extern Base base;
 
+/**
+ * @brief Build the i-th base vector in the current env.
+ *
+ * Unlike da::base[i], which belongs to the default env created by da_init(),
+ * this works in whichever env is current. Library code must use it instead of
+ * da::base so that it stays correct in envs made by da_make_env().
+ */
+NDA da_base(unsigned int i);
+
 } // namespace da

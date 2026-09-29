@@ -126,7 +126,9 @@ public:
      */
     int  change_order(unsigned int new_order);
 
-    /// Restore the order to the value before the last change_order() call.
+    /// Restore the original order given at construction. This is not a stack:
+    /// it ignores any lower order set by earlier change_order() calls. To return
+    /// to a caller's order, save max_order() and call change_order() with it.
     void restore_order();
 
     /**
