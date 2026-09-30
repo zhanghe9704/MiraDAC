@@ -15,6 +15,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+# bash with -eo pipefail (the default run shell has no pipefail, so a failing
+# command in front of a pipe went unnoticed).
+defaults:
+  run:
+    shell: bash
+
 jobs:
   numerical:
     name: Numerical (WITH_SYMBOLIC=OFF)

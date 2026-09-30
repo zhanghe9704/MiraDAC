@@ -6,11 +6,13 @@
 # share. All versions and options come from cmake/symengine_pin.txt.
 #
 # Usage:
-#   scripts/setup_symengine.sh [--prefix DIR] [--python PYTHON] [--print-env]
+#   scripts/setup_symengine.sh [--prefix DIR] [--python PYTHON | --no-python] [--print-env]
 #
 #   --prefix DIR     SymEngine install prefix
 #                    (default: $HOME/.local/opt/symengine-<version>-<commit[:8]>)
 #   --python PYTHON  Python that gets symengine.py (default: <repo>/.venv/bin/python)
+#   --no-python      SymEngine only; skip symengine.py (steps 5-7), e.g. for
+#                    building portable wheels
 #   --print-env      print "export SymEngine_DIR=..." on stdout, for
 #                    eval "$(scripts/setup_symengine.sh --print-env)"
 #
@@ -34,17 +36,23 @@ PIN_FILE="$ROOT/cmake/symengine_pin.txt"
 PREFIX=""
 PY="$ROOT/.venv/bin/python"
 PRINT_ENV=0
+NO_PYTHON=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --prefix)    PREFIX="$2"; shift ;;
     --python)    PY="$2"; shift ;;
     --print-env) PRINT_ENV=1 ;;
+    --no-python) NO_PYTHON=1 ;;
     -h|--help)   sed -n '2,28p' "$0"; exit 0 ;;
     *) echo "setup_symengine: unknown option: $1" >&2; exit 2 ;;
   esac
   shift
 done
+
+# Absolute, but without resolving the venv's python symlink: its directory is
+# put on PATH below, where a relative entry would break once cwd changes.
+case "$PY" in /*) ;; *) PY="$(cd "$(dirname "$PY")" && pwd)/$(basename "$PY")" ;; esac
 
 log() { echo "==> $*" >&2; }
 die() { echo "setup_symengine: error: $*" >&2; exit 1; }
@@ -72,7 +80,8 @@ mkdir -p "$PREFIX"
 PREFIX="$(cd "$PREFIX" && pwd)"
 STAMP="$PREFIX/share/symengine/miradac-pin.txt"
 LIB="$PREFIX/lib/libsymengine.so.$VERSION"
-[ -x "$PY" ] || die "Python not found: $PY (create it with: uv venv .venv --python 3.13)"
+[ "$NO_PYTHON" = 1 ] || [ -x "$PY" ] \
+  || die "Python not found: $PY (create it with: uv venv .venv --python 3.13)"
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/setup_symengine.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -139,7 +148,9 @@ py_ok() {
     || { echo "symengine.__version__ is not $PY_VERSION" >&2; return 1; }
 }
 
-if py_ok 2>/dev/null; then
+if [ "$NO_PYTHON" = 1 ]; then
+  log "--no-python: skipping symengine.py"
+elif py_ok 2>/dev/null; then
   log "symengine.py $PY_VERSION already built against $PREFIX, skipping install"
 else
   # --- 5. symengine.py sdist --------------------------------------------------
