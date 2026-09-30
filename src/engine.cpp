@@ -43,6 +43,56 @@ namespace da {
 namespace detail {
 
 // ---------------------------------------------------------------------------
+// Scratch slots of one kernel call, returned to the pool on every exit path.
+// A kernel that throws part-way (the pool running out while it takes its next
+// temporary) used to leak the temporaries it already held.
+// ---------------------------------------------------------------------------
+namespace {
+
+// One temporary slot (no heap use: these sit on hot paths).
+template<class T>
+struct TempSlot {
+    Pool<T>& pool;
+    unsigned i;
+    explicit TempSlot(Pool<T>& p) : pool(p), i(p.alloc()) {}
+    ~TempSlot() { pool.free(i); }
+    TempSlot(const TempSlot&) = delete;
+    TempSlot& operator=(const TempSlot&) = delete;
+    operator unsigned() const { return i; }
+};
+
+template<class T>
+void swap(TempSlot<T>& a, TempSlot<T>& b) noexcept { std::swap(a.i, b.i); }
+
+// A variable number of slots (the power tables).
+template<class T>
+class ScratchSlots {
+public:
+    explicit ScratchSlots(Pool<T>& pool) : pool_(pool) {}
+    ~ScratchSlots() {
+        for (auto it = slots_.rbegin(); it != slots_.rend(); ++it) pool_.free(*it);
+    }
+    ScratchSlots(const ScratchSlots&) = delete;
+    ScratchSlots& operator=(const ScratchSlots&) = delete;
+
+    unsigned assign() {
+        slots_.reserve(slots_.size() + 1);  // may throw before a slot is taken
+        slots_.push_back(pool_.assign());
+        return slots_.back();
+    }
+    void free(unsigned i) {
+        slots_.erase(std::find(slots_.begin(), slots_.end(), i));
+        pool_.free(i);
+    }
+
+private:
+    Pool<T>& pool_;
+    std::vector<unsigned> slots_;
+};
+
+} // namespace
+
+// ---------------------------------------------------------------------------
 // Internal helpers: scalar dispatch for T  (double vs Expression)
 // ---------------------------------------------------------------------------
 namespace {
@@ -428,9 +478,9 @@ void ad_c_div(Layout& layout, Pool<T>& pool,
         return;
     }
 
-    unsigned ipn = pool.alloc();
-    unsigned ip  = pool.alloc();
-    unsigned itmp= pool.alloc();
+    TempSlot<T> ipn(pool);
+    TempSlot<T> ip(pool);
+    TempSlot<T> itmp(pool);
 
     unsigned iret = ivret;
 
@@ -480,9 +530,6 @@ void ad_c_div(Layout& layout, Pool<T>& pool,
     unsigned lr = pool.len(iret);
     for (unsigned i = 0; i < lr; ++i) ret[i] *= ret_coef;
 
-    pool.free(itmp);
-    pool.free(ip);
-    pool.free(ipn);
 }
 
 // ===========================================================================
@@ -493,10 +540,9 @@ void ad_div(Layout& layout, Pool<T>& pool,
             unsigned ilhs, unsigned irhs, unsigned idst)
 {
     T c = T{1};
-    unsigned itmp = pool.alloc();
+    TempSlot<T> itmp(pool);
     ad_c_div(layout, pool, irhs, c, itmp);
     ad_mult(layout, pool, ilhs, itmp, idst);
-    pool.free(itmp);
 }
 
 // ===========================================================================
@@ -618,9 +664,9 @@ void ad_sqrt(Layout& layout, Pool<T>& pool, unsigned iv, unsigned iret)
     T x = pool.slot(iv)[0];
     unsigned gnd = layout.max_order();
 
-    unsigned itmp = pool.alloc();
-    unsigned ip   = pool.alloc();
-    unsigned ipn  = pool.alloc();
+    TempSlot<T> itmp(pool);
+    TempSlot<T> ip(pool);
+    TempSlot<T> ipn(pool);
 
     ad_copy(layout, pool, iv, ip);
     ad_div_c(layout, pool, ip, x);
@@ -645,9 +691,6 @@ void ad_sqrt(Layout& layout, Pool<T>& pool, unsigned iv, unsigned iret)
     T sx = scalar_sqrt(x);
     ad_mult_const(layout, pool, iret, sx);
 
-    pool.free(ipn);
-    pool.free(ip);
-    pool.free(itmp);
 }
 
 // ===========================================================================
@@ -659,9 +702,9 @@ void ad_exp(Layout& layout, Pool<T>& pool, unsigned iv, unsigned iret)
     T ex = scalar_exp(pool.slot(iv)[0]);
     unsigned gnd = layout.max_order();
 
-    unsigned itmp = pool.alloc();
-    unsigned ip   = pool.alloc();
-    unsigned ipn  = pool.alloc();
+    TempSlot<T> itmp(pool);
+    TempSlot<T> ip(pool);
+    TempSlot<T> ipn(pool);
 
     ad_copy(layout, pool, iv, ip);
     pool.slot(ip)[0] = T{};
@@ -684,9 +727,6 @@ void ad_exp(Layout& layout, Pool<T>& pool, unsigned iv, unsigned iret)
 
     ad_mult_const(layout, pool, iret, ex);
 
-    pool.free(ipn);
-    pool.free(ip);
-    pool.free(itmp);
 }
 
 // ===========================================================================
@@ -699,9 +739,9 @@ void ad_log(Layout& layout, Pool<T>& pool, unsigned iv, unsigned iret)
     T logx0 = scalar_log(x0);
     unsigned gnd = layout.max_order();
 
-    unsigned itmp = pool.alloc();
-    unsigned ip   = pool.alloc();
-    unsigned ipn  = pool.alloc();
+    TempSlot<T> itmp(pool);
+    TempSlot<T> ip(pool);
+    TempSlot<T> ipn(pool);
 
     ad_copy(layout, pool, iv, ip);
     ad_div_c(layout, pool, ip, x0);
@@ -722,9 +762,6 @@ void ad_log(Layout& layout, Pool<T>& pool, unsigned iv, unsigned iret)
         ad_copy(layout, pool, itmp, ipn);
     }
 
-    pool.free(ipn);
-    pool.free(ip);
-    pool.free(itmp);
 }
 
 // ===========================================================================
@@ -742,9 +779,9 @@ void ad_sin(Layout& layout, Pool<T>& pool, unsigned iv, unsigned iret)
     double s = scalar_sin(v0[0]);
     double c = scalar_cos(v0[0]);
 
-    unsigned ipnev = pool.alloc();
-    unsigned ipnod = pool.alloc();
-    unsigned ip    = pool.alloc();
+    TempSlot<T> ipnev(pool);
+    TempSlot<T> ipnod(pool);
+    TempSlot<T> ip(pool);
 
     ad_copy(layout, pool, iv, iret);
     ad_copy(layout, pool, iv, ipnev);
@@ -778,16 +815,13 @@ void ad_sin(Layout& layout, Pool<T>& pool, unsigned iv, unsigned iret)
             case 3: ret[i] -= static_cast<T>(c) * pnev[i]; break;
             }
         }
-        std::swap(ipnev, ipnod);
+        swap(ipnev, ipnod);
         pnev = pool.slot(ipnev);
         pnod = pool.slot(ipnod);
     }
 
     pool.set_len(iret, full_len);
 
-    pool.free(ip);
-    pool.free(ipnod);
-    pool.free(ipnev);
 }
 
 // ===========================================================================
@@ -803,9 +837,9 @@ void ad_cos(Layout& layout, Pool<T>& pool, unsigned iv, unsigned iret)
     double s = scalar_sin(v0[0]);
     double c = scalar_cos(v0[0]);
 
-    unsigned ipnev = pool.alloc();
-    unsigned ipnod = pool.alloc();
-    unsigned ip    = pool.alloc();
+    TempSlot<T> ipnev(pool);
+    TempSlot<T> ipnod(pool);
+    TempSlot<T> ip(pool);
 
     ad_copy(layout, pool, iv, iret);
     ad_copy(layout, pool, iv, ipnev);
@@ -839,16 +873,13 @@ void ad_cos(Layout& layout, Pool<T>& pool, unsigned iv, unsigned iret)
             case 3: ret[i] += static_cast<T>(s) * pnev[i]; break;
             }
         }
-        std::swap(ipnev, ipnod);
+        swap(ipnev, ipnod);
         pnev = pool.slot(ipnev);
         pnod = pool.slot(ipnod);
     }
 
     pool.set_len(iret, full_len);
 
-    pool.free(ip);
-    pool.free(ipnod);
-    pool.free(ipnev);
 }
 
 // ===========================================================================
@@ -916,7 +947,7 @@ void ad_int(Layout& layout, Pool<T>& pool,
     const unsigned int* bptr = layout.base();
 
     // multiply by the base variable, then divide each coefficient by its order
-    unsigned vtemp = pool.alloc();
+    TempSlot<T> vtemp(pool);
     T x0 = T{};
     ad_var(layout, pool, vtemp, x0, base_id);
     ad_mult(layout, pool, iv, vtemp, ov);
@@ -945,7 +976,6 @@ void ad_int(Layout& layout, Pool<T>& pool,
     }
     (void)p;
 
-    pool.free(vtemp);
 }
 
 // ===========================================================================
@@ -970,9 +1000,10 @@ void ad_composition(Layout& layout, Pool<T>& pool,
 
     // Allocate power table: power_vv[var][order] = slot index
     std::vector<std::vector<unsigned>> power_vv(gnv, std::vector<unsigned>(gnd+1));
+    ScratchSlots<T> powers(pool);
     for (unsigned var = 0; var < gnv; ++var) {
         for (unsigned ord = 0; ord < gnd+1; ++ord) {
-            unsigned idx = pool.assign();
+            unsigned idx = powers.assign();
             power_vv[var][ord] = idx;
         }
         // power[0] = constant 1
@@ -983,12 +1014,12 @@ void ad_composition(Layout& layout, Pool<T>& pool,
 
     // power[1] points to the input variable (borrow slot, free it at end)
     for (unsigned i = 0; i < gnv; ++i) {
-        pool.free(power_vv[i][1]);
+        powers.free(power_vv[i][1]);
         power_vv[i][1] = v[i];
     }
 
-    unsigned tmp     = pool.alloc();
-    unsigned product = pool.alloc();
+    TempSlot<T> tmp(pool);
+    TempSlot<T> product(pool);
 
     // Find max length of input vectors
     unsigned veclen_max = 0;
@@ -1046,7 +1077,7 @@ void ad_composition(Layout& layout, Pool<T>& pool,
                     if (c[id] > 0) {
                         ad_mult(layout, pool, product,
                                 power_vv[id][c[id]], tmp);
-                        std::swap(product, tmp);
+                        swap(product, tmp);
                     }
                 }
                 product_flag = false;
@@ -1076,15 +1107,8 @@ void ad_composition(Layout& layout, Pool<T>& pool,
         pool.set_len(ov, len);
     }
 
-    pool.free(tmp);
-    pool.free(product);
 
-    for (unsigned var = 0; var < gnv; ++var) {
-        pool.free(power_vv[var][0]);
-        // power_vv[var][1] == v[var] — borrowed, not freed here
-        for (unsigned ord = 2; ord < gnd+1; ++ord)
-            pool.free(power_vv[var][ord]);
-    }
+    // power_vv[var][1] == v[var] is borrowed; `powers` frees the rest.
 
     (void)full_len; (void)pidx;
 }
@@ -1241,8 +1265,9 @@ void ad_substitute(Layout& layout, Pool<T>& pool,
 
     // Build power table for v_slot
     std::vector<unsigned> power_v(gnd+1);
+    ScratchSlots<T> powers(pool);
     for (auto& idx : power_v) {
-        unsigned si = pool.assign();
+        unsigned si = powers.assign();
         idx = si;
     }
     T* p0 = pool.slot(power_v[0]);
@@ -1317,7 +1342,6 @@ void ad_substitute(Layout& layout, Pool<T>& pool,
     }
     pool.set_len(ov, len);
 
-    for (auto si : power_v) pool.free(si);
 }
 
 // ===========================================================================
@@ -1343,21 +1367,22 @@ void ad_substitute(Layout& layout, Pool<T>& pool,
 
     // Build power tables
     std::vector<std::vector<unsigned>> power_vv(nv, std::vector<unsigned>(gnd+1));
+    ScratchSlots<T> powers(pool);
     for (unsigned k = 0; k < nv; ++k) {
-        for (auto& idx : power_vv[k]) { unsigned si = pool.assign(); idx = si; }
+        for (auto& idx : power_vv[k]) idx = powers.assign();
         T* p0 = pool.slot(power_vv[k][0]);
         p0[0] = T{1};
         pool.set_len(power_vv[k][0], 1);
     }
     for (unsigned i = 0; i < nv; ++i) {
-        pool.free(power_vv[i][1]);
+        powers.free(power_vv[i][1]);
         power_vv[i][1] = v[i];
     }
 
     for (auto ov : ovecs) ad_reset(layout, pool, ov);
 
-    unsigned tmp_slot = pool.alloc();
-    unsigned product  = pool.alloc();
+    TempSlot<T> tmp_slot(pool);
+    TempSlot<T> product(pool);
 
     std::vector<unsigned> c(gnv);
     std::vector<unsigned> bv(gnv);
@@ -1424,7 +1449,7 @@ void ad_substitute(Layout& layout, Pool<T>& pool,
                         for (unsigned id = 0; id < nv; ++id) {
                             if (rc[id] > 0) {
                                 ad_mult(layout, pool, product, power_vv[id][rc[id]], tmp_slot);
-                                std::swap(product, tmp_slot);
+                                swap(product, tmp_slot);
                             }
                         }
                         layout.change_order(gnd);   // back to the caller's order
@@ -1446,7 +1471,7 @@ void ad_substitute(Layout& layout, Pool<T>& pool,
                         for (unsigned id = 0; id < nv; ++id) {
                             if (rc[id] > 0) {
                                 ad_mult(layout, pool, product, power_vv[id][rc[id]], tmp_slot);
-                                std::swap(product, tmp_slot);
+                                swap(product, tmp_slot);
                             }
                         }
                         product_flag = false;
@@ -1481,13 +1506,7 @@ void ad_substitute(Layout& layout, Pool<T>& pool,
         pool.set_len(ov, len);
     }
 
-    pool.free(tmp_slot);
-    pool.free(product);
-
-    for (unsigned k = 0; k < nv; ++k) {
-        pool.free(power_vv[k][0]);
-        for (unsigned ord = 2; ord < gnd+1; ++ord) pool.free(power_vv[k][ord]);
-    }
+    // power_vv[k][1] == v[k] is borrowed; `powers` frees the rest.
 }
 
 // ===========================================================================

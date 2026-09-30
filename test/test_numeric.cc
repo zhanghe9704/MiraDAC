@@ -26,6 +26,7 @@
 #include "da/da.h"
 
 #include <algorithm>
+#include <functional>
 #include <complex>
 #include <fstream>
 #include <sstream>
@@ -452,6 +453,50 @@ TEST_CASE("inv_map of a singular map throws", "[numeric_errors]") {
         // A zero row.
         std::vector<NDA> map0 = { x + x * y, y * y };
         REQUIRE_THROWS_AS(da::inv_map(map0, 2, inv), std::invalid_argument);
+    }
+    da::da_clear();
+}
+
+// ===========================================================================
+// A kernel that runs out of pool slots part-way must still free the
+// temporaries it already took. For each operation, leave k = 0..8 free slots,
+// run it (it may succeed or throw), and check that the pool is back to where
+// it was once the result is gone.
+// ===========================================================================
+TEST_CASE("kernels free their temporaries when the pool runs out", "[numeric_leak]") {
+    da::da_init(4, 2, 60);
+    {
+        NDA x = 0.3 + da::base[0] + 0.5 * da::base[1] * da::base[0];
+        NDA y = 0.7 + da::base[1] + 0.2 * da::base[0] * da::base[0];
+        std::vector<NDA> map = { x, y };
+        std::vector<unsigned int> idx{0};
+        std::vector<NDA> sub1 = { y };
+        const int baseline = da::da_count();
+
+        const std::vector<std::pair<const char*, std::function<void()>>> ops = {
+            {"exp",  [&] { NDA r = da::exp(x); }},
+            {"log",  [&] { NDA r = da::log(y); }},
+            {"sqrt", [&] { NDA r = da::sqrt(y); }},
+            {"sin",  [&] { NDA r = da::sin(x); }},
+            {"cos",  [&] { NDA r = da::cos(x); }},
+            {"div",  [&] { NDA r = x / y; }},
+            {"cdiv", [&] { NDA r = 2.0 / y; }},
+            {"int",  [&] { NDA r = da::da_int(x, 0); }},
+            {"compose", [&] { std::vector<NDA> out(2); da::da_composition(map, map, out); }},
+            {"substitute", [&] { NDA r; da::da_substitute(x, 0, y, r); }},
+            {"substitute_multi", [&] { NDA r; da::da_substitute(x, idx, sub1, r); }},
+        };
+        for (const auto& [name, op] : ops) {
+            for (int k = 0; k <= 8; ++k) {
+                std::vector<NDA> fill;
+                fill.reserve(64);
+                while (da::da_remain() > k) fill.emplace_back(1.0);
+                try { op(); } catch (const std::runtime_error&) {}
+                fill.clear();
+                INFO(name << " with " << k << " free slot(s)");
+                REQUIRE(da::da_count() == baseline);
+            }
+        }
     }
     da::da_clear();
 }
