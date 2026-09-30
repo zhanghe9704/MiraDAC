@@ -1,0 +1,31 @@
+# Patterns for nanobind.stubgen (plan T8.1). Regenerate the stub with
+#   .venv/bin/python -m nanobind.stubgen -m miradac._core -P \
+#       -p python/stubgen_patterns.txt -o python/miradac/_core.pyi
+# python/tests/test_stubs.py fails when the committed stub is out of date.
+
+_core\.__prefix__:
+    import contextlib
+    import typing
+
+    __version__: str
+
+# Build-specific paths and hashes.
+_core\._LIBSYMENGINE_EXPECTED$:
+    _LIBSYMENGINE_EXPECTED: str
+
+_core\._LIBSYMENGINE_SHA256$:
+    _LIBSYMENGINE_SHA256: str
+
+# Set in miradac/__init__.py.
+\.Env\.order$:
+    def order(self, n: int) -> contextlib.AbstractContextManager[None]:
+        """Temporarily truncate this env at order ``n``; nests correctly."""
+
+\.Expr\.to_sympy$:
+    def to_sympy(self) -> typing.Any:
+        """The sympy expression equal to this Expr."""
+
+\.Expr\.from_sympy$:
+    @staticmethod
+    def from_sympy(e: typing.Any) -> Expr:
+        """The Expr equal to the sympy expression ``e``."""

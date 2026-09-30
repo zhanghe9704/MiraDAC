@@ -7,7 +7,20 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # --- Options ---
 option(WITH_SYMBOLIC "Build symbolic (SDA) support" ON)
+option(DA_IGNORE_SYMENGINE_PIN
+    "Accept any SymEngine and only warn when it is not the pinned build (benchmark comparisons only)" OFF)
+option(DA_BUILD_TESTS "Build C++ tests" ON)
+option(DA_BUILD_EXAMPLES "Build examples" ON)
+option(DA_BUILD_BENCH "Build the C++ baseline benchmark for the Python binding" OFF)
 set(DA_CHECK_ENV 1 CACHE STRING "Enable env guard (1=on, 0=off)")
+
+# A Python build (scikit-build-core) links daStatic into a shared module, so it
+# needs PIC, and it builds nothing but the library and the module.
+if(SKBUILD)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+    set(DA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(DA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+endif()
 
 # NOTE: DA_CHECK_ENV and DA_WITH_SYMBOLIC are applied below as PUBLIC compile
 # definitions on the library targets, NOT with add_compile_definitions().
@@ -18,7 +31,9 @@ set(DA_CHECK_ENV 1 CACHE STRING "Enable env guard (1=on, 0=off)")
 
 # --- Symbolic support ---
 if(WITH_SYMBOLIC)
-    find_package(SymEngine REQUIRED CONFIG)
+    # Finds SymEngine at the version in cmake/symengine_pin.txt and checks the
+    # build stamp written by scripts/setup_symengine.sh.
+    include(${CMAKE_SOURCE_DIR}/cmake/CheckSymEnginePin.cmake)
     set(DA_SYMENGINE_INCLUDES ${SYMENGINE_INCLUDE_DIRS})
     set(DA_SYMENGINE_LIBS ${SYMENGINE_LIBRARIES})
 else()
@@ -113,8 +128,22 @@ install(FILES
 )
 
 # --- Tests ---
-enable_testing()
-add_subdirectory(test)
+if(DA_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(test)
+endif()
 
 # --- Examples ---
-add_subdirectory(examples)
+if(DA_BUILD_EXAMPLES)
+    add_subdirectory(examples)
+endif()
+
+# --- Benchmark (C++ baseline for the Python binding) ---
+if(DA_BUILD_BENCH)
+    add_subdirectory(python/bench)
+endif()
+
+# --- Python module ---
+if(SKBUILD)
+    add_subdirectory(python)
+endif()

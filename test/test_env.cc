@@ -111,6 +111,23 @@ TEST_CASE("da_select_env switches current env", "[env]") {
     da::da_clear();
 }
 
+TEST_CASE("da_exchange_env swaps the current env and returns the previous one", "[env]") {
+    da::da_init(4, 3, 100);
+    da::DAEnv* env_a = &da::da_current_env();
+    da::DAEnv env_b(2, 2, 50, false);
+
+    REQUIRE(da::da_exchange_env(&env_b) == env_a);
+    REQUIRE(&da::da_current_env() == &env_b);
+    REQUIRE(da::da_exchange_env(env_a) == &env_b);
+    REQUIRE(&da::da_current_env() == env_a);
+
+    REQUIRE(da::da_exchange_env(nullptr) == env_a);
+    REQUIRE_THROWS_AS(da::da_current_env(), std::runtime_error);
+    REQUIRE(da::da_exchange_env(env_a) == nullptr);
+
+    da::da_clear();
+}
+
 // ======================================================================
 // Tear down and re-init
 // ======================================================================

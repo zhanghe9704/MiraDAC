@@ -100,8 +100,14 @@ unsigned DAEnv::promote(const DAEnv& src_env, unsigned src_slot) {
     unsigned len = src_pool.len(src_slot);
     const double* src = src_pool.slot(src_slot);
     SymEngine::Expression* dst = dst_pool.slot(dst_slot);
-    for (unsigned i = 0; i < len; ++i)
-        dst[i] = SymEngine::Expression(src[i]);
+    // Same rule as promote(const NDA&): an integer value becomes an exact integer.
+    for (unsigned i = 0; i < len; ++i) {
+        long iv = static_cast<long>(src[i]);
+        if (src[i] == static_cast<double>(iv))
+            dst[i] = SymEngine::Expression(iv);
+        else
+            dst[i] = SymEngine::Expression(src[i]);
+    }
     dst_pool.set_len(dst_slot, len);
     return dst_slot;
 }
@@ -148,6 +154,12 @@ DAEnv& da_current_env() {
 
 void da_select_env(DAEnv& env) {
     tl_current_env = &env;
+}
+
+DAEnv* da_exchange_env(DAEnv* env) noexcept {
+    DAEnv* prev = tl_current_env;
+    tl_current_env = env;
+    return prev;
 }
 
 DAEnv& da_make_env(unsigned order, unsigned num_vars,

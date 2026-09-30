@@ -457,6 +457,70 @@ TEST_CASE("inv_map works when no default env exists", "[multienv][inv_map]") {
     da::da_destroy_env(env2);
 }
 
+// ============================================================================
+// import_to / promote_to: vectors that own the new slot
+// ============================================================================
+
+TEST_CASE("import_to round trip keeps the data", "[multienv][import_to]") {
+    da::DAEnv env_a(4, 3, 100, false);
+    da::DAEnv env_b(4, 3, 100, false);
+    da::DAEnv env_c(3, 3, 100, false);
+
+    da::da_select_env(env_a);
+    da::NDA x = 1.5 + da::da_base(0) * da::da_base(1) - 2.0 * da::da_base(2);
+    unsigned used_a = env_a.pool<double>().count();
+
+    da::da_select_env(env_c);                  // import_to ignores the current env
+    da::NDA y = da::import_to(env_b, x);
+    REQUIRE(y.env_ == &env_b);
+    REQUIRE(&da::da_current_env() == &env_c);
+    REQUIRE(env_b.pool<double>().count() == 1);
+
+    da::NDA z = da::import_to(env_a, y);
+    REQUIRE(z.env_ == &env_a);
+    REQUIRE(env_a.pool<double>().count() == used_a + 1);
+    REQUIRE(z.length() == x.length());
+    const double* xs = env_a.pool<double>().slot(x.slot_);
+    const double* zs = env_a.pool<double>().slot(z.slot_);
+    for (unsigned i = 0; i < 35; ++i)
+        REQUIRE(zs[i] == xs[i]);
+
+    REQUIRE_THROWS_AS(da::import_to(env_c, x), std::invalid_argument);
+    REQUIRE(env_c.pool<double>().count() == 0);
+}
+
+#ifdef DA_WITH_SYMBOLIC
+TEST_CASE("import_to and promote_to for SDA", "[multienv][import_to][symbolic]") {
+    da::DAEnv env_a(3, 2, 100, false);
+    da::DAEnv env_b(3, 2, 100, false);
+    da::DAEnv env_c(3, 3, 100, false);
+
+    da::da_select_env(env_a);
+    da::NDA x = 0.5 + da::da_base(0) + 3.0 * da::da_base(0) * da::da_base(1);
+
+    da::SDA s = da::promote_to(env_b, x);
+    REQUIRE(s.env_ == &env_b);
+    REQUIRE(&da::da_current_env() == &env_a);
+    REQUIRE(s.length() == x.length());
+    da::SDA p = da::promote(x);               // same coefficients (1.0 -> exact 1)
+    const SymEngine::Expression* ps = env_a.pool<SymEngine::Expression>().slot(p.slot_);
+    const SymEngine::Expression* ss = env_b.pool<SymEngine::Expression>().slot(s.slot_);
+    for (unsigned i = 0; i < s.length(); ++i)
+        REQUIRE(ss[i] == ps[i]);
+    REQUIRE(ss[1] == SymEngine::Expression(1));
+
+    da::SDA t = da::import_to(env_a, s);
+    REQUIRE(t.env_ == &env_a);
+    REQUIRE(t.length() == s.length());
+    const SymEngine::Expression* ts = env_a.pool<SymEngine::Expression>().slot(t.slot_);
+    for (unsigned i = 0; i < 10; ++i)
+        REQUIRE(ts[i] == ss[i]);
+
+    REQUIRE_THROWS_AS(da::promote_to(env_c, x), std::invalid_argument);
+    REQUIRE_THROWS_AS(da::import_to(env_c, s), std::invalid_argument);
+}
+#endif
+
 TEST_CASE("move-assign between envs moves the env with the slot", "[multienv][move]") {
     da::DAEnv env_a(3, 2, 50, false);
     da::DAEnv env_b(3, 2, 50, false);

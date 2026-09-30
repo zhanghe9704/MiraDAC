@@ -16,7 +16,7 @@ if(_da_with_symbolic)
     if(_da_symengine_dir AND NOT SymEngine_DIR)
         set(SymEngine_DIR "${_da_symengine_dir}")
     endif()
-    find_dependency(SymEngine CONFIG)
+    find_dependency(SymEngine @DA_SYMENGINE_FIND_VERSION@ CONFIG)
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/daTargets.cmake")

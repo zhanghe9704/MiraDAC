@@ -31,3 +31,8 @@ da_output.txt
 *.so.*
 *.dll
 *.dylib
+
+# Python
+.venv/
+__pycache__/
+.mypy_cache/

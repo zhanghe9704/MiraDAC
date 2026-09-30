@@ -1,0 +1,40 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "nanobind>=2.0"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "miradac"
+version = "0.1.0"
+description = "Python binding of MiraDAC, a differential algebra library in C++"
+readme = "README.md"
+requires-python = ">=3.9"
+
+[project.optional-dependencies]
+# Zero-copy interop needs symengine.py built against the pinned SymEngine
+# (scripts/setup_symengine.sh); the PyPI wheel works in string mode only.
+symengine = ["symengine==0.14.1"]
+
+[tool.scikit-build]
+cmake.build-type = "Release"
+# Needed by editable installs with editable.rebuild (the plan's build command).
+build-dir = "build-py/{wheel_tag}"
+install.components = ["python"]
+wheel.packages = ["python/miradac"]
+
+[tool.scikit-build.cmake.define]
+WITH_SYMBOLIC = "ON"
+
+[tool.uv]
+no-binary-package = ["symengine"]
+
+# mypy: symengine.py and sympy ship no type information.
+[[tool.mypy.overrides]]
+module = ["symengine", "symengine.*", "sympy", "sympy.*"]
+ignore_missing_imports = true
+
+# The generated stub mirrors the runtime overloads: an int overload after a
+# float one (the order plan A.5 picks for speed), and in-place operators that
+# take fewer operand types than the binary ones (x += 1j rebinds x to a CNDA).
+[[tool.mypy.overrides]]
+module = "miradac._core"
+disable_error_code = ["overload-cannot-match", "misc"]

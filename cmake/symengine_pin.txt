@@ -1,0 +1,30 @@
+# SymEngine version pin — single source of truth for MiraDAC's SymEngine.
+#
+# symengine.py (the Python binding) only supports the SymEngine commit it pins
+# in its symengine_version.txt. MiraDAC's Python interop hands SymEngine
+# objects across by pointer, which is safe only when symengine.py and MiraDAC
+# load one and the same libsymengine.so, so MiraDAC uses that same commit.
+# The commit is v0.14.0 + 14 commits and still reports version 0.14.0.
+#
+# Read by scripts/setup_symengine.sh (builds SymEngine and symengine.py) and by
+# cmake/CheckSymEnginePin.cmake (configure-time check). Format: KEY=value, one
+# per line. Keys starting with SYMENGINE_ are metadata; every other key is a
+# SymEngine CMake option, passed as -DKEY=value and recorded in the stamp file
+# <prefix>/share/symengine/miradac-pin.txt.
+#
+# Upgrade procedure: see "SymEngine version" in README.md. Change this file only
+# after a new symengine.py release pins a new commit, and update both sha256
+# values with it.
+SYMENGINE_COMMIT=153b7e98f310bccaae586dab6b49284ccd5f4174
+SYMENGINE_VERSION=0.14.0
+SYMENGINE_TARBALL_SHA256=4bf4c742738bdc086bf115f23d609752e14a98176931eba553835737d4bc6c63
+SYMENGINE_PY_VERSION=0.14.1
+SYMENGINE_PY_SDIST_SHA256=4e9e4b4ec56371c2151803ae0403dab07dd1c74ce88e9abca433bebeb6e2f0f0
+BUILD_SHARED_LIBS=ON
+INTEGER_CLASS=gmp
+WITH_SYMENGINE_THREAD_SAFE=OFF
+WITH_FLINT=OFF
+WITH_MPFR=OFF
+WITH_MPC=OFF
+WITH_LLVM=OFF
+CMAKE_BUILD_TYPE=Release

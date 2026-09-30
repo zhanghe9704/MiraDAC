@@ -91,6 +91,10 @@ struct DAVector {
         other.slot_ = no_slot;
     }
 
+    /// Adopt a slot already taken from env's pool<T>() (e.g. by DAEnv::import).
+    /// The vector frees it on destruction.
+    DAVector(DAEnv& env, unsigned slot) noexcept : env_(&env), slot_(slot) {}
+
     /// Construct from double constant.
     explicit DAVector(double x)
         : env_(&da_current_env()), slot_(env_->template pool<T>().alloc())
@@ -932,6 +936,29 @@ inline SDA operator/(SymEngine::Expression x, const SDA& a) {
     return res;
 }
 
+/**
+ * @brief Promote src into env dst, returning an SDA of dst that owns the new slot.
+ *
+ * Wraps DAEnv::promote(); the current env is not used or changed.
+ *
+ * @throws std::invalid_argument if the two layouts differ.
+ */
+inline SDA promote_to(DAEnv& dst, const NDA& src) {
+    return SDA(dst, dst.promote(*src.env_, src.slot_));
+}
+
 #endif // DA_WITH_SYMBOLIC
+
+/**
+ * @brief Copy src into env dst, returning a vector of dst that owns the new slot.
+ *
+ * Wraps DAEnv::import<T>(); the current env is not used or changed.
+ *
+ * @throws std::invalid_argument if the two layouts differ.
+ */
+template<class T>
+DAVector<T> import_to(DAEnv& dst, const DAVector<T>& src) {
+    return DAVector<T>(dst, dst.template import<T>(*src.env_, src.slot_));
+}
 
 } // namespace da

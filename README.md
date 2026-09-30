@@ -33,14 +33,14 @@ cd test && ../build/test/run_tests
 
 ### Full build with symbolic support
 
-SymEngine must be installed (or built from source). Point CMake at it:
+Symbolic support needs the pinned SymEngine build (see [SymEngine version](#symengine-version)).
+Build it once, then point CMake at it:
 
 ```bash
-cmake -S . -B build \
-    -DWITH_SYMBOLIC=ON \
-    -DSymEngine_DIR=/path/to/symengine/lib/cmake/symengine
+eval "$(scripts/setup_symengine.sh --print-env)"   # sets SymEngine_DIR
+cmake -S . -B build -DWITH_SYMBOLIC=ON -DSymEngine_DIR="$SymEngine_DIR"
 cmake --build build -j4
-cd test && LD_LIBRARY_PATH=/path/to/symengine/lib ../build/test/run_tests
+cd test && ../build/test/run_tests
 ```
 
 ### Install
@@ -64,6 +64,73 @@ target_link_libraries(myapp PRIVATE da::daStatic)
 |--------|---------|-------------|
 | `WITH_SYMBOLIC` | `ON` | Enable SDA / SymEngine support |
 | `DA_CHECK_ENV` | `1` | Runtime cross-environment guard (set to `0` to disable) |
+| `DA_BUILD_TESTS` | `ON` | Build the C++ test suite (forced `OFF` in a Python build) |
+| `DA_BUILD_EXAMPLES` | `ON` | Build the examples (forced `OFF` in a Python build) |
+| `DA_BUILD_BENCH` | `OFF` | Build `python/bench/bench_cpp`, the C++ baseline for the Python benchmark |
+| `DA_IGNORE_SYMENGINE_PIN` | `OFF` | Accept any SymEngine and only warn when it is not the pinned build. Exists solely to benchmark against another SymEngine release (the symbolic benchmark's comparison with 0.15.0); never use it for a real build |
+
+## SymEngine version
+
+MiraDAC is pinned to one SymEngine build, recorded in `cmake/symengine_pin.txt`:
+
+| Item | Value |
+|---|---|
+| SymEngine commit | `153b7e98f310bccaae586dab6b49284ccd5f4174` (v0.14.0 + 14 commits; reports version `0.14.0`) |
+| symengine.py | `0.14.1` (the release that pins this commit) |
+| Build options | `BUILD_SHARED_LIBS=ON`, `INTEGER_CLASS=gmp`, `WITH_SYMENGINE_THREAD_SAFE=OFF`, no FLINT/MPFR/MPC/LLVM, `Release` |
+| Install prefix | `$HOME/.local/opt/symengine-0.14.0-153b7e98` (dedicated, so it never mixes with another SymEngine) |
+
+**Why.** The Python package hands SymEngine objects to and from symengine.py by pointer (zero
+copy). That is only safe when both load one and the same `libsymengine.so`. symengine.py only
+supports the SymEngine commit it pins, so MiraDAC uses that commit too, and symengine.py is built
+from source against it.
+
+**Install.** Build the pinned SymEngine and build symengine.py against it into `.venv`
+(needs `curl`, CMake, a C++ compiler and the GMP headers):
+
+```bash
+uv venv .venv --python 3.13                  # once, if .venv does not exist
+scripts/setup_symengine.sh                   # [--prefix DIR] [--python PYTHON]
+eval "$(scripts/setup_symengine.sh --print-env)"   # before every CMake configure
+```
+
+The script verifies both downloads by sha256, writes a stamp
+`<prefix>/share/symengine/miradac-pin.txt` (commit, options, library sha256), and checks that the
+installed `symengine_wrapper` links `libsymengine.so.0.14` from the prefix. A rerun skips whatever
+is already correct. CMake refuses to configure MiraDAC against any other SymEngine (a different
+version, or the v0.14.0 tag, which reports the same version but has no stamp), and the installed
+`daConfig.cmake` requires `SymEngine 0.14.0 EXACT` from consumers.
+
+**Do not `pip install symengine` from PyPI.** The PyPI wheel compiles its own private SymEngine
+into `symengine_wrapper.so`; it can never share objects with MiraDAC, so interop falls back to
+(slow) string conversion with a warning. If you install symengine.py yourself instead of using the
+script, build it from source against the pin prefix (its build needs `cython` on `PATH`):
+
+```bash
+.venv/bin/python -m pip install cython setuptools
+PATH=$PWD/.venv/bin:$PATH CMAKE_PREFIX_PATH=$HOME/.local/opt/symengine-0.14.0-153b7e98 \
+    .venv/bin/python -m pip install --no-build-isolation --no-binary symengine symengine==0.14.1
+```
+
+**Checking interop.** `miradac.symengine_interop_status()` reports whether interop runs in
+zero-copy or string mode and the result of each check: the symengine.py version, that its wrapper
+links `libsymengine.so.0.14`, that the process maps exactly one `libsymengine` (the same file
+MiraDAC uses), and a layout self-test. Set `MIRADAC_REQUIRE_SHARED_SYMENGINE=1` to turn a failed
+check into an error instead of a warning.
+
+**Benchmarking against another SymEngine.** `-DDA_IGNORE_SYMENGINE_PIN=ON` accepts any SymEngine
+(for example 0.15.0) and turns the pin check into a warning. It exists solely so the symbolic
+benchmark can compare releases; such a build must not be used with symengine.py.
+
+**Upgrading the pin.**
+1. Wait for a symengine.py release; take the SymEngine commit from its `symengine_version.txt`.
+2. Update `cmake/symengine_pin.txt`: `SYMENGINE_COMMIT`, `SYMENGINE_VERSION`,
+   `SYMENGINE_PY_VERSION`, and both sha256 values (`SYMENGINE_TARBALL_SHA256` of
+   `https://github.com/symengine/symengine/archive/<commit>.tar.gz`, `SYMENGINE_PY_SDIST_SHA256`
+   as listed on PyPI).
+3. Run `scripts/setup_symengine.sh` on a fresh prefix, then the full C++ suite, the Python suite,
+   and the symbolic benchmark against the old and the new pin.
+4. Commit the pin change on its own.
 
 ## Quick start
 
@@ -282,6 +349,77 @@ da::da_destroy_env(env2);   // deletes it, or retires it if vectors remain
 `delete &env2` is only correct when nothing references the environment any
 more; `da_destroy_env()` checks for you (`env.live_slots()` reports the
 count).
+
+## Python
+
+The package `miradac` binds NDA, CNDA, SDA, CSDA and the multi-environment API with
+[nanobind](https://nanobind.readthedocs.io). Bound calls add about 50–130 ns to the C++ time, so
+Python code driving DA arithmetic runs close to C++ speed (see `python/bench/REPORT.md`).
+
+### Build
+
+Everything Python lives in the virtual env `.venv` at the repository root.
+
+```bash
+uv venv .venv --python 3.13                         # once
+scripts/setup_symengine.sh                          # pinned SymEngine + symengine.py (see above)
+uv pip install --python .venv nanobind scikit-build-core pytest numpy sympy mypy
+uv pip install --python .venv --reinstall pip       # a uv venv has no bin/pip
+eval "$(scripts/setup_symengine.sh --print-env)"    # sets SymEngine_DIR
+.venv/bin/pip install --no-build-isolation -Ceditable.rebuild=true -e .
+.venv/bin/pytest python/tests -q
+```
+
+The editable install rebuilds the extension on `import miradac` whenever a source file changed
+(set `SymEngine_DIR` in that shell too). `.venv/bin/pip wheel . --no-build-isolation -w dist`
+builds a wheel; it links SymEngine from the pin prefix by RPATH, so it only runs on a machine with
+that prefix.
+
+### Example
+
+```python
+import numpy
+import miradac as da
+
+da.init(order=4, nvars=3, pool_size=1000)       # default env
+x = 1.0 + da.var(0) + 2*da.var(1)               # NDA
+y = da.exp(x); y += x*x
+with da.order(2):                               # temporary truncation, nests correctly
+    z = da.sin(y)
+c = da.CNDA(x, y); w = da.exp(c)                # complex numeric
+a, b = da.symbols("a b")                        # Expr
+s = a*da.svar(0) + da.SDA(1.5)                  # SDA
+v = da.evaluate(da.exp(s), {a: 0.3})            # -> NDA
+m = da.NDAList([x, y, z]); pts = numpy.random.rand(10000, 3)
+out = da.evaluate_map(m, pts)                   # (10000, 3) ndarray, one C++ loop
+
+e = da.Env(order=10, nvars=2, pool_size=500)    # second env; does not change the current env
+with e:
+    q = da.var(0) * da.var(1)                   # lives in e
+f = da.Env(order=4, nvars=3, pool_size=100)
+x2 = f.import_(x)                               # copy into f (ValueError if layouts differ)
+e.close()                                       # q now raises EnvError on use
+```
+
+`python/examples/` holds Python ports of the C++ examples. Every binding has a docstring
+(`help(da.NDA)`), and the package ships type stubs (`_core.pyi`, `py.typed`) checked with
+`mypy --strict`.
+
+### Notes
+
+- Every operation runs in the env of its first DA operand, whichever env is current. Vectors of
+  different envs in one operation raise `miradac.EnvError`, as does a vector whose env was closed
+  or cleared.
+- Map-level functions (`compose`, `substitute`, `inv_map`, `cd_composition`, `evaluate_map`) take
+  `NDAList`/`CNDAList`/`SDAList`/`CSDAList`, which hold the vectors in C++. A plain list works as
+  an input but is copied element by element; output arguments must be one of these list types.
+- C++ has no CNDA⊕NDA or CSDA⊕SDA operators: write `c + da.CNDA(x)`.
+- The GIL is never released: DA pools and SymEngine are not thread safe. Use processes for
+  parallelism.
+- Exceptions: `EnvError` (a `RuntimeError`), `ValueError` for invalid arguments and domain errors,
+  `IndexError` for out-of-range indices, `RuntimeError` when a pool runs out.
+- The stub `python/miradac/_core.pyi` is generated; after changing a binding, regenerate it with
+  the command at the top of `python/stubgen_patterns.txt` (a test fails while it is stale).
 
 ## API summary
 

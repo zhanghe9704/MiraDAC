@@ -1,0 +1,22 @@
+{
+  "n3o4/add": 39.4,
+  "n3o4/mul": 168.8,
+  "n3o4/iadd": 12.3,
+  "n3o4/mul_const": 31.1,
+  "n3o4/exp": 741.9,
+  "n3o4/composition": 9639.9,
+  "n6o6/add": 590.8,
+  "n6o6/mul": 11581.6,
+  "n6o6/iadd": 188.2,
+  "n6o6/mul_const": 452.2,
+  "n6o6/exp": 69575.2,
+  "n6o6/composition": 23710737.0,
+  "n6o10/add": 8387.4,
+  "n6o10/mul": 430154.7,
+  "n6o10/iadd": 2189.1,
+  "n6o10/mul_const": 6103.9,
+  "n6o10/exp": 4271458.5,
+  "n6o10/composition": 9924473186.0,
+  "sym_n3o3/mul": 34369.9,
+  "sym_n3o3/exp": 71176.9
+}

@@ -131,7 +131,8 @@ public:
     /**
      * @brief Promote a double slot to a SymEngine::Expression slot.
      *
-     * Same-layout only; each element is promoted via
+     * Same-layout only; each element is promoted as in promote(const NDA&):
+     * an integer value becomes an exact integer, anything else
      * Expression(double_value).
      *
      * @throws std::invalid_argument if layouts differ.
@@ -181,6 +182,18 @@ DAEnv& da_current_env();
  * @param env  Must outlive any DAVectors created while it is current.
  */
 void da_select_env(DAEnv& env);
+
+/**
+ * @brief Set the current (thread-local) DA environment and return the previous one.
+ *
+ * Unlike da_select_env(), env may be null, which leaves no environment
+ * selected (da_current_env() then throws). Pass the returned pointer back
+ * to restore the previous selection.
+ *
+ * @param env  New current environment, or nullptr.
+ * @return     The previously current environment, or nullptr if none was selected.
+ */
+DAEnv* da_exchange_env(DAEnv* env) noexcept;
 
 /**
  * @brief Create a new heap-allocated environment and select it as current.
