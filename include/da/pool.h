@@ -149,12 +149,13 @@ public:
     void free(unsigned i) {
         if (size_ == 0) return;  // pool already destroyed; no-op
         reset(i);
-        // Append i to the tail of the free-list.
-        // Before: free_[tail_] = sentinel; adlist[ad_end] = n
-        // After:  free_[i] = old sentinel, free_[tail_] = i, tail_ = i
-        free_[i]     = free_[tail_];  // i's next = old sentinel (= size_)
-        free_[tail_]  = i;            // old tail now points to i
-        tail_         = i;            // i is the new tail
+        // Append i to the tail of the free-list; its "next" is the sentinel.
+        free_[i] = size_;
+        if (head_ == size_)
+            head_ = i;                // list was empty (pool exhausted): i starts it
+        else
+            free_[tail_] = i;         // old tail now points to i
+        tail_ = i;
     }
 
     // ------------------------------------------------------------------ //

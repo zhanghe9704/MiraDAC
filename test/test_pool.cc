@@ -282,3 +282,29 @@ TEST_CASE("Pool<string> assign len is 0; alloc len is 1", "[pool][string]") {
     unsigned b = p.alloc();
     REQUIRE(p.len(b) == 1);
 }
+
+// ===========================================================================
+// A slot freed while the pool is exhausted must go back on the free list.
+// ===========================================================================
+TEST_CASE("Pool<double> free after exhaustion recycles the slot", "[pool][double]") {
+    da::Pool<double> p;
+    p.reserve(35, 3);
+    unsigned a = p.assign(), b = p.assign(), c = p.assign();
+    REQUIRE(p.remain() == 0);
+    REQUIRE_THROWS_AS(p.assign(), std::runtime_error);
+
+    p.free(b);
+    REQUIRE(p.remain() == 1);
+    REQUIRE(p.assign() == b);
+    REQUIRE(p.remain() == 0);
+
+    p.free(a);
+    p.free(b);
+    p.free(c);
+    REQUIRE(p.remain() == 3);
+    REQUIRE(p.count() == 0);
+    unsigned x = p.assign(), y = p.assign(), z = p.assign();
+    REQUIRE(x != y);
+    REQUIRE(y != z);
+    REQUIRE(x != z);
+}

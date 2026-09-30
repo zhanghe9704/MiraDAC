@@ -20,6 +20,7 @@
 #ifdef DA_WITH_SYMBOLIC
 
 #include "catch.hpp"
+#include <sstream>
 #include "da/da.h"
 
 #include <symengine/expression.h>
@@ -457,6 +458,52 @@ TEST_CASE("Symbolic CD: cd_composition vector<SDA> into complex map", "[symbolic
     double eps = 1e-9;
     REQUIRE(cnda_eq(sout0_eval, num_out[0], eps));
     REQUIRE(cnda_eq(sout1_eval, num_out[1], eps));
+}
+
+// ---------------------------------------------------------------------------
+// CSDA mixed with SDA and with a symbolic scalar (Expression)
+// ---------------------------------------------------------------------------
+TEST_CASE("Symbolic CD: CSDA with SDA and Expression operands", "[symbolic_cd]") {
+    da::da_init(3, 2, 800);
+
+    SE::Expression b1 = make_sym("b1"), b2 = make_sym("b2");
+    SE::Expression c1 = make_sym("c1"), c2 = make_sym("c2");
+    SE::Expression e1 = make_sym("e1"), k = make_sym("k");
+    CSDA z = make_csda(0.8, b1, b2, 0.3, c1, c2);
+    SDA s = SDA(SE::Expression(0.5)) + e1 * promote(da::base[0]);
+
+    auto vals = make_vals({{"b1", 0.3}, {"b2", -0.1}, {"c1", 0.2}, {"c2", 0.4},
+                           {"e1", -0.15}, {"k", 1.7}});
+    CNDA zn = make_cnda(0.8, 0.3, -0.1, 0.3, 0.2, 0.4);
+    NDA sn = NDA(0.5) + NDA(-0.15) * da::base[0];
+    const double kn = 1.7;
+
+    auto check = [&](const CSDA& sym, CNDA num) {
+        CNDA got = eval_csda(sym, vals);
+        REQUIRE(cnda_eq(got, num, 1e-12));
+    };
+
+    SECTION("CSDA op SDA") {
+        check(z + s, zn + sn);  check(s + z, sn + zn);
+        check(z - s, zn - sn);  check(s - z, sn - zn);
+        check(z * s, zn * sn);  check(s * z, sn * zn);
+        check(z / s, zn / sn);  check(s / z, sn / zn);
+    }
+    SECTION("CSDA op Expression") {
+        check(z + k, zn + kn);  check(k + z, kn + zn);
+        check(z - k, zn - kn);  check(k - z, kn - zn);
+        check(z * k, zn * kn);  check(k * z, kn * zn);
+        check(z / k, zn / kn);  check(k / z, kn / zn);
+    }
+    SECTION("operator<< prints both parts") {
+        std::ostringstream os;
+        os << z;
+        const std::string out = os.str();
+        REQUIRE(out.find("Real part") != std::string::npos);
+        REQUIRE(out.find("Imaginary part") != std::string::npos);
+        REQUIRE(out.find("b1") != std::string::npos);
+        REQUIRE(out.find("c1") != std::string::npos);
+    }
 }
 
 #endif // DA_WITH_SYMBOLIC

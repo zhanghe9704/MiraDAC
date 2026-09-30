@@ -79,13 +79,16 @@ struct DAVector {
         detail::ad_copy(env_->layout(), env_->template pool<T>(), other.slot_, slot_);
     }
 
-    /// Move: steal the slot; leave source in a valid but "free'd" state.
-    /// We re-assign source a fresh slot so its dtor can safely free it.
+    /// Marks a vector that owns no slot: the source of a move, or a vector
+    /// after clear(). Such a vector may only be destroyed or assigned to.
+    static constexpr unsigned no_slot = std::numeric_limits<unsigned>::max();
+
+    /// Move: take over the slot; the source is left owning none, so a move
+    /// needs no free slot and cannot throw.
     DAVector(DAVector&& other) noexcept
         : env_(other.env_), slot_(other.slot_)
     {
-        // Give 'other' a freshly assigned (not alloc'd) slot so its dtor is safe.
-        other.slot_ = other.env_->template pool<T>().assign();
+        other.slot_ = no_slot;
     }
 
     /// Construct from double constant.
@@ -129,7 +132,7 @@ struct DAVector {
         //
         // Still unsafe: `delete &env` on a DAEnv that vectors reference.
         // Use da_destroy_env() instead.
-        if (env_ && env_->template pool<T>().poolsize() > 0)
+        if (slot_ != no_slot && env_ && env_->template pool<T>().poolsize() > 0)
             env_->template pool<T>().free(slot_);
     }
 
@@ -140,15 +143,19 @@ struct DAVector {
     DAVector& operator=(const DAVector& other) {
         if (this == &other) return *this;
         // Keep our own slot but copy data from other (env_ unchanged).
+        if (slot_ == no_slot) slot_ = env_->template pool<T>().alloc();
         detail::ad_copy(env_->layout(), env_->template pool<T>(), other.slot_, slot_);
         return *this;
     }
 
     DAVector& operator=(DAVector&& other) noexcept {
         if (this == &other) return *this;
-        // Swap slots; the other's dtor will free the slot we give it.
+        // Swap env and slot together (a slot index only means something in
+        // its own env's pool); the other's dtor frees what we give it.
+        std::swap(env_, other.env_);
         std::swap(slot_, other.slot_);
-        detail::ad_reset(env_->layout(), other.env_->template pool<T>(), other.slot_);
+        if (other.slot_ != no_slot)
+            detail::ad_reset(other.env_->layout(), other.env_->template pool<T>(), other.slot_);
         return *this;
     }
 
@@ -396,11 +403,12 @@ struct DAVector {
         return detail::ad_zero_check(env_->layout(), env_->template pool<T>(), slot_, threshold);
     }
 
-    /// Return slot to pool (the object becomes invalid — use with extreme care).
+    /// Return slot to pool. The vector then owns no slot: it may only be
+    /// destroyed or assigned to.
     void clear() {
+        if (slot_ == no_slot) return;
         env_->template pool<T>().free(slot_);
-        // Re-assign a dummy slot so the dtor doesn't double-free.
-        slot_ = env_->template pool<T>().assign();
+        slot_ = no_slot;
     }
 
     // --------------------------------------------------------------------- //
@@ -787,10 +795,9 @@ DAVector<T> operator*(double x, const DAVector<T>& a) {
 
 template<class T>
 DAVector<T> operator/(const DAVector<T>& a, double x) {
-    if (std::abs(x) < std::numeric_limits<double>::min()) {
-        std::cerr << "ERROR: divide by a too small number! " << x << std::endl;
-        std::exit(-1);
-    }
+    // Below DBL_MIN, x is zero or subnormal and 1/x overflows to inf.
+    if (std::abs(x) < std::numeric_limits<double>::min())
+        throw std::invalid_argument("da::operator/: divide by zero or a subnormal number");
     return a * (1.0 / x);
 }
 

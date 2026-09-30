@@ -380,3 +380,78 @@ TEST_CASE("multi-base da_substitute keeps a caller-lowered order", "[numeric_ord
     }
     da::da_clear();
 }
+
+// ===========================================================================
+// Moving a DA vector hands over its slot and needs no free slot. It used to
+// take a new slot for the source, which threw inside the noexcept move
+// constructor (std::terminate) when the pool was full.
+// ===========================================================================
+TEST_CASE("NDA move needs no free slot", "[numeric_move]") {
+    da::da_init(2, 2, 8);
+    {
+        std::vector<NDA> hold;
+        hold.reserve(16);
+        while (da::da_remain() > 0) hold.emplace_back(1.0 + hold.size());
+        const int used = da::da_count();
+
+        {
+            NDA moved(std::move(hold.back()));             // move construction
+            REQUIRE(moved.con() == Approx(static_cast<double>(hold.size())));
+            REQUIRE(da::da_count() == used);
+        }                                                  // frees the moved slot
+        REQUIRE(da::da_remain() == 1);
+
+        std::swap(hold[0], hold[1]);                       // move-assign into moved-from
+        REQUIRE(hold[0].con() == Approx(2.0));
+        REQUIRE(hold[1].con() == Approx(1.0));
+
+        hold.back() = hold[0];                             // copy-assign into moved-from
+        REQUIRE(hold.back().con() == Approx(2.0));
+        REQUIRE(da::da_remain() == 0);
+    }
+    REQUIRE(da::da_count() == 2);                          // only the two bases left
+    da::da_clear();
+}
+
+TEST_CASE("NDA clear() works on a full pool", "[numeric_move]") {
+    da::da_init(2, 2, 3);
+    {
+        NDA a(1.0);
+        REQUIRE(da::da_remain() == 0);
+        REQUIRE_NOTHROW(a.clear());
+        REQUIRE(da::da_remain() == 1);
+    }
+    REQUIRE(da::da_count() == 2);
+    da::da_clear();
+}
+
+// ===========================================================================
+// Errors must throw, not end the process.
+// ===========================================================================
+TEST_CASE("NDA / tiny number throws", "[numeric_errors]") {
+    da::da_init(3, 2, 100);
+    {
+        NDA a = 1.0 + da::base[0];
+        REQUIRE_THROWS_AS(a / 0.0, std::invalid_argument);
+        REQUIRE_THROWS_AS(a / 1e-310, std::invalid_argument);   // subnormal
+        REQUIRE_NOTHROW(a / 1e-300);
+        REQUIRE(da::da_count() == 3);                           // nothing leaked
+    }
+    da::da_clear();
+}
+
+TEST_CASE("inv_map of a singular map throws", "[numeric_errors]") {
+    da::da_init(3, 2, 200);
+    {
+        NDA x = da::base[0];
+        NDA y = da::base[1];
+        std::vector<NDA> inv(2);
+        // Rank 1: rows are multiples of each other (zero pivot).
+        std::vector<NDA> map = { x + y + x * x, 2.0 * x + 2.0 * y };
+        REQUIRE_THROWS_AS(da::inv_map(map, 2, inv), std::invalid_argument);
+        // A zero row.
+        std::vector<NDA> map0 = { x + x * y, y * y };
+        REQUIRE_THROWS_AS(da::inv_map(map0, 2, inv), std::invalid_argument);
+    }
+    da::da_clear();
+}

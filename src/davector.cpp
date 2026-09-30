@@ -235,6 +235,16 @@ std::ostream& operator<<(std::ostream& os, const DAVector<SymEngine::Expression>
     return os;
 }
 
+// operator<< for CSDA: the two parts one after the other (symbolic
+// coefficients are too wide for the side-by-side layout of CNDA).
+template<>
+std::ostream& operator<<(std::ostream& os, const std::complex<DAVector<SymEngine::Expression>>& cd)
+{
+    os << "Real part:" << std::endl << get_real(cd)
+       << "Imaginary part:" << std::endl << get_imag(cd);
+    return os;
+}
+
 // DAVector<SymEngine::Expression>::print — reuse the SDA operator<< above.
 // Declared before the explicit instantiation of DAVector<Expression> below so
 // the specialization is picked up (otherwise print() would be undefined for SDA).

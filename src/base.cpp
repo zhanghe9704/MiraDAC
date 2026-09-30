@@ -84,10 +84,8 @@ static void _ludcmp(std::vector<std::vector<double>>& a, const int n,
         big = 0.0;
         for (int j = 0; j < n; ++j)
             if ((temp = std::fabs(a[i][j])) > big) big = temp;
-        if (big < tiny) {
-            std::cout << "Singular matrix in routine LUDcmp" << std::endl;
-            exit(EXIT_FAILURE);
-        }
+        if (big < tiny)
+            throw std::invalid_argument("inv_map: the linear part of the map is singular");
         vv[i] = 1.0 / big;
     }
     for (int j = 0; j < n; ++j) {
@@ -112,7 +110,10 @@ static void _ludcmp(std::vector<std::vector<double>>& a, const int n,
             vv[imax] = vv[j];
         }
         idx[j] = imax;
-        if (std::fabs(a[j][j]) < tiny) a[j][j] = tiny;
+        // The reference replaced a zero pivot with tiny, which turned a
+        // singular map into huge or inf coefficients without any error.
+        if (std::fabs(a[j][j]) < tiny)
+            throw std::invalid_argument("inv_map: the linear part of the map is singular");
         if (j != (n - 1)) {
             dum = 1.0 / (a[j][j]);
             for (int i = j + 1; i < n; ++i) a[i][j] *= dum;

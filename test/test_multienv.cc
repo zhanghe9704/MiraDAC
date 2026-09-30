@@ -456,3 +456,23 @@ TEST_CASE("inv_map works when no default env exists", "[multienv][inv_map]") {
     check_inv_map_identity();
     da::da_destroy_env(env2);
 }
+
+TEST_CASE("move-assign between envs moves the env with the slot", "[multienv][move]") {
+    da::DAEnv env_a(3, 2, 50, false);
+    da::DAEnv env_b(3, 2, 50, false);
+    {
+        da::da_select_env(env_a);
+        da::NDA a(1.0);
+        da::da_select_env(env_b);
+        da::NDA b(2.0);
+        a = std::move(b);
+        REQUIRE(a.env_ == &env_b);
+        REQUIRE(a.con() == Approx(2.0));
+        REQUIRE(b.env_ == &env_a);                     // b holds a's old, reset slot
+        REQUIRE(b.con() == Approx(0.0));
+        REQUIRE(env_a.pool<double>().count() == 1);
+        REQUIRE(env_b.pool<double>().count() == 1);
+    }
+    REQUIRE(env_a.pool<double>().count() == 0);
+    REQUIRE(env_b.pool<double>().count() == 0);
+}

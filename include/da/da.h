@@ -250,6 +250,17 @@ using CNDA = std::complex<NDA>;
  *       overloads; the scalar SDA versions do exist.
  */
 using CSDA = std::complex<SDA>;
+
+// CSDA (op) Expression: a symbolic scalar is real, so it acts on the real part
+// for + and -, and on both parts for * and /.
+inline CSDA operator+(const CSDA& z, const SymEngine::Expression& e) { return CSDA(get_real(z) + e, get_imag(z)); }
+inline CSDA operator+(const SymEngine::Expression& e, const CSDA& z) { return z + e; }
+inline CSDA operator-(const CSDA& z, const SymEngine::Expression& e) { return CSDA(get_real(z) - e, get_imag(z)); }
+inline CSDA operator-(const SymEngine::Expression& e, const CSDA& z) { return CSDA(e - get_real(z), -get_imag(z)); }
+inline CSDA operator*(const CSDA& z, const SymEngine::Expression& e) { return CSDA(get_real(z) * e, get_imag(z) * e); }
+inline CSDA operator*(const SymEngine::Expression& e, const CSDA& z) { return z * e; }
+inline CSDA operator/(const CSDA& z, const SymEngine::Expression& e) { return CSDA(get_real(z) / e, get_imag(z) / e); }
+inline CSDA operator/(const SymEngine::Expression& e, const CSDA& z) { return e * (1.0 / z); }
 #endif
 
 // ===========================================================================
