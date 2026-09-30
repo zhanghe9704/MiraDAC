@@ -66,6 +66,10 @@ endif()
 set_target_properties(daShared PROPERTIES
     VERSION   ${PROJECT_VERSION}
     SOVERSION ${PROJECT_VERSION_MAJOR}
+    # Keep the directories of linked libraries outside the system paths (the
+    # pinned SymEngine prefix) in the installed RUNPATH, so the installed
+    # library finds libsymengine without LD_LIBRARY_PATH.
+    INSTALL_RPATH_USE_LINK_PATH ON
 )
 target_compile_definitions(daShared PUBLIC DA_CHECK_ENV=${DA_CHECK_ENV})
 if(WITH_SYMBOLIC)

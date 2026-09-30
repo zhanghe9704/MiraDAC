@@ -345,6 +345,15 @@ Background and all values: A.8. **Do not modify `~/.local` without the user's ex
   EXACT check keeps MiraDAC from using it.
 - Acceptance: `ldd ~/.local/lib/libdaShared.so` shows `libsymengine.so.0.14` from the pin prefix;
   the out-of-tree `find_package(da)` check from the previous install still prints the same values.
+- *Done 2026-09-30 (user approved).* Installed from commit `8f9c1cc`. The first install showed
+  `libsymengine.so.0.14 => not found` for `libdaShared.so`: CMake strips the build RUNPATH on
+  install, and the pin prefix is not on the loader path (0.15.0 had been in `~/.local/lib`, which
+  consumers reached only through their own RUNPATH). `daShared` now sets
+  `INSTALL_RPATH_USE_LINK_PATH`, so the installed library carries
+  `RUNPATH=<pin prefix>/lib`. Both acceptance checks pass: `ldd` resolves
+  `libsymengine.so.0.14` from the pin prefix, and the out-of-tree consumer, configured with no
+  `SymEngine_DIR`, `CMAKE_PREFIX_PATH` or `LD_LIBRARY_PATH`, prints `1.000000 0.500000 -0.125000`,
+  `a` and `(3.933052, 2.148636)`, as before.
 
 **TP.5 Documentation.**
 - Files: `README.md` (new section "SymEngine version"), `cmake/symengine_pin.txt` (header comment).
