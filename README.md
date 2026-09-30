@@ -370,6 +370,20 @@ eval "$(scripts/setup_symengine.sh --print-env)"    # sets SymEngine_DIR
 .venv/bin/pytest python/tests -q
 ```
 
+#### Numeric-only install
+
+Without symbolic support (no SymEngine, no GMP; NDA, CNDA, `Env` and the map functions only,
+`miradac.HAS_SYMBOLIC` is `False`):
+
+```bash
+pip install . -Ccmake.define.WITH_SYMBOLIC=OFF
+```
+
+No pinned SymEngine or `SymEngine_DIR` is needed, and the build ignores any SymEngine installed
+on the machine.
+
+#### Notes on the build
+
 The editable install rebuilds the extension on `import miradac` whenever a source file changed
 (set `SymEngine_DIR` in that shell too). `.venv/bin/pip wheel . --no-build-isolation -w dist`
 builds a wheel; it links SymEngine from the pin prefix by RPATH, so it only runs on a machine with
@@ -413,7 +427,8 @@ e.close()                                       # q now raises EnvError on use
 - Map-level functions (`compose`, `substitute`, `inv_map`, `cd_composition`, `evaluate_map`) take
   `NDAList`/`CNDAList`/`SDAList`/`CSDAList`, which hold the vectors in C++. A plain list works as
   an input but is copied element by element; output arguments must be one of these list types.
-- C++ has no CNDA⊕NDA or CSDA⊕SDA operators: write `c + da.CNDA(x)`.
+- CNDA⊕NDA, CSDA⊕SDA and CSDA⊕`Expr` (or `symengine.Basic`) work on both sides; CSDA⊕NDA and
+  CSDA⊕CNDA do not (promote first: `z + da.promote(x)`).
 - The GIL is never released: DA pools and SymEngine are not thread safe. Use processes for
   parallelism.
 - Exceptions: `EnvError` (a `RuntimeError`), `ValueError` for invalid arguments and domain errors,

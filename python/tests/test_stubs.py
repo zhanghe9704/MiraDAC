@@ -13,6 +13,7 @@ STUB = ROOT / "python" / "miradac" / "_core.pyi"
 PATTERNS = ROOT / "python" / "stubgen_patterns.txt"
 
 
+@pytest.mark.skipif(not core.HAS_SYMBOLIC, reason="the committed stub describes the symbolic build")
 def test_stub_is_current(tmp_path):
     """The committed stub equals a fresh nanobind.stubgen run (see PATTERNS)."""
     out = tmp_path / "_core.pyi"

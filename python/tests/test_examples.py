@@ -5,11 +5,16 @@ import sys
 
 import pytest
 
+import miradac
+
 EXAMPLES = sorted((pathlib.Path(__file__).parents[1] / "examples").glob("*.py"))
+SYMBOLIC = {"example_1_symbolic", "example_complex_symbolic", "example_interop"}
 
 
 @pytest.mark.parametrize("path", EXAMPLES, ids=lambda p: p.stem)
 def test_example_runs(path, tmp_path):
+    if path.stem in SYMBOLIC and not miradac.HAS_SYMBOLIC:
+        pytest.skip("built without symbolic support")
     # In a subprocess, since each example calls init() and clear(); in
     # tmp_path, since examples.py writes da_output.txt.
     r = subprocess.run([sys.executable, str(path)], cwd=tmp_path, capture_output=True, text=True)
