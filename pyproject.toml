@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "miradac"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Python binding of MiraDAC, a differential algebra library in C++"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -20,6 +20,12 @@ cmake.build-type = "Release"
 build-dir = "build-py/{wheel_tag}"
 install.components = ["python"]
 wheel.packages = ["python/miradac"]
+
+# One version for the C++ library and the Python package: project() in CMakeLists.txt.
+[tool.scikit-build.metadata.version]
+provider = "scikit_build_core.metadata.regex"
+input = "CMakeLists.txt"
+regex = 'project\(da VERSION (?P<value>[0-9.]+)'
 
 [tool.scikit-build.cmake.define]
 WITH_SYMBOLIC = "ON"

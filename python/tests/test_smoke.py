@@ -4,7 +4,8 @@ import miradac
 
 
 def test_version():
-    assert miradac.__version__ == "0.1.0"
+    from importlib.metadata import version
+    assert miradac.__version__ == version("miradac")
 
 
 @pytest.mark.skipif(not miradac.HAS_SYMBOLIC, reason="numeric-only build")

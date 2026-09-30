@@ -15,6 +15,8 @@ nanobind_add_module(_core NB_STATIC NOMINSIZE
     src/bind_cnda.cpp
 )
 target_link_libraries(_core PRIVATE daStatic)
+# miradac.__version__ is the C++ project version (pyproject.toml reads the same).
+target_compile_definitions(_core PRIVATE DA_VERSION="${PROJECT_VERSION}")
 
 if(WITH_SYMBOLIC)
     set_target_properties(_core PROPERTIES INSTALL_RPATH "${DA_SYMENGINE_PREFIX}/lib")

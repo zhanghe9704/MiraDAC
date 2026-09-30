@@ -1,7 +1,7 @@
 #include "common.h"
 
 NB_MODULE(_core, m) {
-    m.attr("__version__") = "0.1.0";
+    m.attr("__version__") = DA_VERSION;
 #ifdef DA_WITH_SYMBOLIC
     m.attr("HAS_SYMBOLIC") = true;
 #else
