@@ -16,6 +16,7 @@ PATTERNS = ROOT / "python" / "stubgen_patterns.txt"
 @pytest.mark.skipif(not core.HAS_SYMBOLIC, reason="the committed stub describes the symbolic build")
 def test_stub_is_current(tmp_path):
     """The committed stub equals a fresh nanobind.stubgen run (see PATTERNS)."""
+    pytest.importorskip("nanobind.stubgen")
     out = tmp_path / "_core.pyi"
     subprocess.run([sys.executable, "-m", "nanobind.stubgen", "-q", "-m", "miradac._core", "-P",
                     "-p", str(PATTERNS), "-o", str(out)],

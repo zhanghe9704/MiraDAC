@@ -36,3 +36,5 @@ da_output.txt
 .venv/
 __pycache__/
 .mypy_cache/
+wheelhouse/
+dist/

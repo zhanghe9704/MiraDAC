@@ -132,7 +132,10 @@ inline Status run_checks() {
     s.loaded = mapped_libsymengine();
     const std::string expected = DA_SYMENGINE_LIB;
 
-    if (s.version != DA_SYMENGINE_PY_VERSION) {
+    if (expected.empty()) {
+        s.reason = "this build bundles its own SymEngine copy (portable wheel); for shared mode, "
+                   "build miradac from source after scripts/setup_symengine.sh";
+    } else if (s.version != DA_SYMENGINE_PY_VERSION) {
         s.reason = "symengine.py is version " + s.version + ", the pin is " DA_SYMENGINE_PY_VERSION;
     } else if (std::find(s.needed.begin(), s.needed.end(), DA_SYMENGINE_SONAME) == s.needed.end()) {
         s.reason = s.wrapper_path + " does not link " DA_SYMENGINE_SONAME
@@ -167,9 +170,11 @@ inline const Status& status() {
 // String mode: raise with MIRADAC_REQUIRE_SHARED_SYMENGINE=1, else warn once.
 inline void enter_string_mode(const Status& s) {
     const char* req = std::getenv("MIRADAC_REQUIRE_SHARED_SYMENGINE");
-    const std::string msg = "miradac: symengine.py interop is in string mode (" + s.reason +
-        "); build symengine.py against the pinned SymEngine with scripts/setup_symengine.sh "
+    // A portable wheel's reason already names the fix (build miradac itself).
+    const std::string fix = std::string(DA_SYMENGINE_LIB).empty() ? "" :
+        "; build symengine.py against the pinned SymEngine with scripts/setup_symengine.sh "
         "(plan TP.2) for zero-copy conversion";
+    const std::string msg = "miradac: symengine.py interop is in string mode (" + s.reason + ")" + fix;
     if (req && std::strcmp(req, "1") == 0) throw std::runtime_error(msg);
     static bool warned = false;
     if (!warned) {

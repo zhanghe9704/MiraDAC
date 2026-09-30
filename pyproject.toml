@@ -27,6 +27,29 @@ WITH_SYMBOLIC = "ON"
 [tool.uv]
 no-binary-package = ["symengine"]
 
+# Portable Linux wheels: `cibuildwheel --platform linux` (also run by the
+# wheels CI workflow). The pinned SymEngine is built inside the manylinux
+# image and auditwheel bundles it with GMP, so the wheels need nothing on the
+# target machine; symengine.py interop then works through strings only.
+[tool.cibuildwheel]
+build = ["cp310-*", "cp311-*", "cp312-*", "cp313-*", "cp314-*"]
+# musllinux: not a target; free-threaded CPython: the GIL is never released
+# and the DA pools are not thread-safe (plan A.6).
+skip = ["*-musllinux_*", "cp31*t-*"]
+archs = ["x86_64"]
+test-requires = ["pytest", "numpy", "sympy"]
+test-command = "pytest {project}/python/tests -q"
+
+[tool.cibuildwheel.linux]
+manylinux-x86_64-image = "manylinux_2_28"
+before-all = [
+    "dnf install -y gmp-devel",
+    "scripts/setup_symengine.sh --no-python --prefix /opt/symengine",
+]
+environment = { SymEngine_DIR = "/opt/symengine/lib/cmake/symengine" }
+# build-dir: not the dev build's build-py/, which may be copied in with the project.
+config-settings = { "cmake.define.MIRADAC_BUNDLED_SYMENGINE" = "ON", "build-dir" = "/tmp/miradac-build/{wheel_tag}" }
+
 # mypy: symengine.py and sympy ship no type information.
 [[tool.mypy.overrides]]
 module = ["symengine", "symengine.*", "sympy", "sympy.*"]

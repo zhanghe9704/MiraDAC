@@ -1151,4 +1151,14 @@ cases, with machine and compiler info.
 - GIL release (needs per-env locks and a thread-safe SymEngine build); free-threaded Python.
 - Pickling (needs a portable format that records order and nvars).
 - Fast repeated SDA evaluation through SymEngine `Lambdify` (a big win for parameter scans).
-- Portable wheels (`auditwheel` bundling SymEngine and GMP) and stable-ABI builds.
+- Stable-ABI builds; wheels for other platforms (aarch64, macOS, Windows).
+- *Done 2026-09-30:* portable Linux wheels. `[tool.cibuildwheel]` in `pyproject.toml` builds
+  manylinux_2_28 x86_64 wheels for CPython 3.10–3.14 (no 3.9: current manylinux images dropped
+  it; no free-threaded builds, see A.6). The pinned SymEngine is built in the image
+  (`setup_symengine.sh --no-python`) and bundled with GMP by auditwheel; each wheel runs the
+  Python suite. With `MIRADAC_BUNDLED_SYMENGINE` the import-time libsymengine check is skipped
+  and symengine.py interop reports string mode with that reason (zero-copy needs one shared
+  libsymengine, which a wheel's private copy can never be). `.github/workflows/wheels.yml` builds
+  them on `v*` tags (attached to a GitHub Release, with the sdist) or by hand. Stored-reference
+  comparisons in `test_symbolic.py` use 1e-12: the manylinux build differs by up to 1.6e-13
+  relative on an order-5 `tanh` coefficient.

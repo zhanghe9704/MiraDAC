@@ -12,6 +12,8 @@ def _check_libsymengine() -> None:
 
     loaded = _core._libsymengine_path()
     expected = _core._LIBSYMENGINE_EXPECTED
+    if not expected:
+        return  # a portable wheel: its bundled copy is the only one it can load
     if os.path.realpath(loaded) != expected:
         raise ImportError(f"miradac: loaded libsymengine {loaded}, built against {expected}")
     if _core._LIBSYMENGINE_SHA256:

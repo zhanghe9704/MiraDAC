@@ -382,6 +382,23 @@ pip install . -Ccmake.define.WITH_SYMBOLIC=OFF
 No pinned SymEngine or `SymEngine_DIR` is needed, and the build ignores any SymEngine installed
 on the machine.
 
+#### Portable wheels
+
+Linux x86_64 wheels (`manylinux_2_28`, CPython 3.10–3.14) need nothing installed on the target
+machine: they carry the pinned SymEngine and GMP inside the wheel. Each version tag `v*` attaches
+them to a GitHub Release (workflow `.github/workflows/wheels.yml`), and the workflow can also be
+run by hand to get them as artifacts. Install one with `pip install miradac-<version>-<tag>.whl`.
+To build them locally (needs Docker):
+
+```bash
+uvx cibuildwheel --platform linux --output-dir wheelhouse
+```
+
+A wheel's SymEngine is its own private copy, so it cannot share expressions with symengine.py
+without copying: interop works in string mode (`miradac.symengine_interop_status()["mode"] ==
+"string"`, with the reason given). For zero-copy interop, build from source after
+`scripts/setup_symengine.sh`, as above.
+
 #### Notes on the build
 
 The editable install rebuilds the extension on `import miradac` whenever a source file changed

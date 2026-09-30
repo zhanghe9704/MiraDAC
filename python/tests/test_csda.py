@@ -259,16 +259,21 @@ def test_inplace_operators(env32, rhs):
 
 
 def test_sda_and_expr_operands(env32):
-    import symengine
     b1, b2, c1, c2, e1, k = da.symbols("b1 b2 c1 c2 e1 k")
     z = make_csda(0.8, b1, b2, 0.3, c1, c2)
     s = da.SDA(0.5) + e1 * da.svar(0)
     vals = {b1: 0.3, b2: -0.1, c1: 0.2, c2: 0.4, e1: -0.15, k: 1.7}
     zn = make_cnda(0.8, 0.3, -0.1, 0.3, 0.2, 0.4)
     sn = da.NDA(0.5) - 0.15 * da.var(0)
+    operands = [(s, sn), (k, 1.7)]
+    try:
+        import symengine
+        operands.append((symengine.Symbol("k"), 1.7))
+    except ImportError:
+        pass
     for op in ("__add__", "__sub__", "__mul__", "__truediv__"):
         rop = op.replace("__", "__r", 1)
-        for sym, num in ((s, sn), (k, 1.7), (symengine.Symbol("k"), 1.7)):
+        for sym, num in operands:
             got = getattr(z, op)(sym)
             assert isinstance(got, da.CSDA)
             assert same(da.evaluate(got, vals), getattr(zn, op)(num), 1e-12)

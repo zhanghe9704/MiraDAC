@@ -21,8 +21,18 @@ if(WITH_SYMBOLIC)
     target_sources(_core PRIVATE src/bind_expr.cpp src/bind_sda.cpp src/bind_csda.cpp)
     # Constants for the interop checks (plan A.8): the libsymengine we link,
     # its sha256 from the pin stamp, its soname, and the pinned symengine.py.
-    get_target_property(_se_lib symengine LOCATION)
-    get_filename_component(_se_lib "${_se_lib}" REALPATH)
+    # A portable wheel (MIRADAC_BUNDLED_SYMENGINE, set by the cibuildwheel
+    # config) carries its own renamed copy of libsymengine, patched by
+    # auditwheel: its path and sha256 are unknown here, so both stay empty,
+    # the import check is skipped, and symengine.py interop uses strings.
+    option(MIRADAC_BUNDLED_SYMENGINE "libsymengine is bundled into the wheel" OFF)
+    if(MIRADAC_BUNDLED_SYMENGINE)
+        set(_se_lib "")
+        set(DA_SYMENGINE_LIB_SHA256 "")
+    else()
+        get_target_property(_se_lib symengine LOCATION)
+        get_filename_component(_se_lib "${_se_lib}" REALPATH)
+    endif()
     string(REGEX MATCH "^[0-9]+\\.[0-9]+" _se_major_minor "${DA_SYMENGINE_VERSION}")
     target_compile_definitions(_core PRIVATE
         DA_SYMENGINE_LIB="${_se_lib}"
