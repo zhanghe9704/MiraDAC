@@ -1,8 +1,10 @@
 name: CI
 
-# Builds and tests both variants of the `da` library:
+# Builds and tests both variants of the `da` library and of the Python
+# package `miradac`:
 #   * numerical-only  (WITH_SYMBOLIC=OFF)  — no external dependencies
-#   * numerical+symbolic (WITH_SYMBOLIC=ON) — SymEngine from conda-forge
+#   * numerical+symbolic (WITH_SYMBOLIC=ON) — the pinned SymEngine
+#     (cmake/symengine_pin.txt), built by scripts/setup_symengine.sh
 #
 # Mirrors the exact configure commands used during development so the
 # SymEngine-enabled build is reproducible.
@@ -48,34 +50,47 @@ jobs:
           cmake --build build-consumer -j2
           ./build-consumer/consumer_smoke
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Python package, numeric-only build
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install pytest numpy mypy
+          .venv/bin/pip install . -Ccmake.define.WITH_SYMBOLIC=OFF
+          .venv/bin/pytest python/tests -q
+
   symbolic:
-    name: Symbolic (WITH_SYMBOLIC=ON, SymEngine via conda-forge)
+    name: Symbolic (WITH_SYMBOLIC=ON, pinned SymEngine)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash -el {0}   # login shell so the conda env is active
     steps:
       - uses: actions/checkout@v4
 
       - name: Install toolchain
-        run: sudo apt-get update && sudo apt-get install -y cmake g++
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ ninja-build libgmp-dev
 
-      - name: Set up SymEngine from conda-forge
-        uses: conda-incubator/setup-miniconda@v3
+      - uses: actions/setup-python@v5
         with:
-          auto-update-conda: true
-          channels: conda-forge
-          channel-priority: strict
+          python-version: "3.13"
 
-      - name: Install SymEngine
-        run: conda install -y symengine gmp
+      - name: Cache the pinned SymEngine
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/opt
+          key: symengine-${{ runner.os }}-${{ hashFiles('cmake/symengine_pin.txt', 'scripts/setup_symengine.sh') }}
+
+      - name: Pinned SymEngine and symengine.py
+        run: |
+          python -m venv .venv
+          # Builds SymEngine (skipped when the cache holds a matching stamp),
+          # then symengine.py from source against it, into .venv.
+          scripts/setup_symengine.sh --python .venv/bin/python --print-env \
+            | sed 's/^export //' >> "$GITHUB_ENV"
 
       - name: Configure + build + test (symbolic)
         run: |
-          # $CONDA_PREFIX points at the active conda env that has SymEngine + GMP.
-          ./build.sh --symbolic \
-            --symengine-dir "$CONDA_PREFIX/lib/cmake/symengine" \
-            --gmp-dir "$CONDA_PREFIX" \
+          ./build.sh --symbolic --symengine-dir "$SymEngine_DIR" \
             --build-dir build-on --jobs 2
 
       - name: Tests under AddressSanitizer (leak detection on)
@@ -86,8 +101,14 @@ jobs:
       - name: Consumer smoke-test (symbolic install)
         run: |
           cmake --install build-on --prefix "$PWD/_install_on"
+          # No SymEngine hint: the installed package config finds the pin.
           cmake -S test/consumer -B build-consumer-on \
-            -Dda_DIR="$PWD/_install_on/lib/cmake/da" \
-            -DSymEngine_DIR="$CONDA_PREFIX/lib/cmake/symengine"
+            -Dda_DIR="$PWD/_install_on/lib/cmake/da"
           cmake --build build-consumer-on -j2
           ./build-consumer-on/consumer_smoke
+
+      - name: Python package, symbolic build
+        run: |
+          .venv/bin/pip install nanobind scikit-build-core pytest numpy sympy mypy
+          .venv/bin/pip install --no-build-isolation .
+          .venv/bin/pytest python/tests -q
