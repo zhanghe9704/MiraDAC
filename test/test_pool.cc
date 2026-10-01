@@ -343,3 +343,22 @@ TEST_CASE("Pool<string> free releases the elements at once", "[pool][string]") {
     unsigned b = p.alloc();
     for (unsigned k = 0; k < 4; ++k) REQUIRE(p.slot(b)[k].empty());
 }
+
+// ===========================================================================
+// The most recently freed slot is handed out first (a stack), so a kernel's
+// temporaries keep reusing a few warm slots whatever order the caller freed
+// its vectors in (a garbage-collected caller frees them in scattered order).
+// ===========================================================================
+TEST_CASE("Pool hands out the most recently freed slot first", "[pool][double]") {
+    da::Pool<double> p;
+    p.reserve(8, 6);
+    unsigned a = p.assign(), b = p.assign(), c = p.assign();
+    p.free(a);
+    p.free(c);
+    REQUIRE(p.assign() == c);
+    REQUIRE(p.assign() == a);
+    p.free(b);
+    REQUIRE(p.assign() == b);
+    REQUIRE(p.remain() == 3);
+    REQUIRE(p.count() == 3);
+}

@@ -10,11 +10,14 @@
  * n slots of full_len elements each.
  *
  * Free-list structure (ported from ref/tpsa/src/tpsa_extend.cc):
- *   - free_[i]  : "next slot after i" (mirrors adlist[i]).
- *   - head_     : index of the next slot to hand out (mirrors ad_flag).
- *   - tail_     : index of the last slot in the free-list (mirrors ad_end).
- *   - free_[tail_] holds the sentinel value (= size_).
- *   - Exhaustion: head_ == free_[tail_].
+ *   - free_[i]  : "next free slot after i"; the list ends at the sentinel size_.
+ *   - head_     : index of the next slot to hand out.
+ *   - Exhaustion: head_ == size_.
+ *   - The list is a stack: free() pushes on the head, so the most recently
+ *     freed slot is handed out first and a kernel's temporaries keep reusing
+ *     a few warm slots. (The reference queued freed slots at the tail; with a
+ *     caller that frees in scattered order, such as Julia's GC, temporaries
+ *     then landed on cold memory all over the pool.)
  *
  * POD fast-path vs non-POD path (if constexpr):
  *   - If T is trivially copyable, zero_slot uses memset and
@@ -46,7 +49,7 @@ public:
 
     /// Default-constructed pool is empty; call reserve() before use.
     Pool() noexcept
-        : block_(nullptr), head_(0), tail_(0), full_len_(0), size_(0)
+        : block_(nullptr), head_(0), full_len_(0), size_(0)
     {}
 
     ~Pool() noexcept { destroy(); }
@@ -107,9 +110,7 @@ public:
         for (unsigned i = 0; i < n; ++i)
             slot_[i] = block_ + static_cast<std::size_t>(i) * full_len;
 
-        // head_ = 0 (ad_flag), tail_ = n-1 (ad_end)
         head_ = 0;
-        tail_ = n - 1;
     }
 
     /**
@@ -119,13 +120,12 @@ public:
      * (Reference: "Run out of vectors" + exit(-1).)
      */
     unsigned assign() {
-        // Exhaustion: head_ == free_[tail_]  (mirrors: ad_flag == adlist[ad_end])
-        if (head_ == free_[tail_]) {
+        if (head_ == size_) {
             throw std::runtime_error("Pool::assign: Run out of vectors");
         }
         unsigned i = head_;
         len_[i]    = 0;
-        head_      = free_[i];  // advance head (mirrors: ad_flag = adlist[ad_flag])
+        head_      = free_[i];
         // A slot handed out is zero. Doubles are zeroed here, where the slot is
         // about to be written; non-trivial types were cleared by free(). Zeroing
         // doubles in free() instead touched slots that had long gone cold when
@@ -147,7 +147,7 @@ public:
 
     /**
      * @brief Return slot i to the free-list (O(1)).
-     * (Port of ad_free — appends to the tail.)
+     * (Port of ad_free, except that the slot is pushed on the head.)
      *
      * Non-trivial elements are cleared at once; doubles are zeroed by the next assign().
      */
@@ -157,13 +157,8 @@ public:
             len_[i] = 0;         // zeroed by the next assign()
         else
             reset(i);            // release the elements' resources now
-        // Append i to the tail of the free-list; its "next" is the sentinel.
-        free_[i] = size_;
-        if (head_ == size_)
-            head_ = i;                // list was empty (pool exhausted): i starts it
-        else
-            free_[tail_] = i;         // old tail now points to i
-        tail_ = i;
+        free_[i] = head_;  // push on the head (the sentinel if the pool was full)
+        head_    = i;
     }
 
     // ------------------------------------------------------------------ //
@@ -213,7 +208,6 @@ public:
             free_[k] = k + 1;
         free_[n - 1] = n;  // sentinel
         head_ = idx;
-        tail_ = n - 1;
     }
 
     // ------------------------------------------------------------------ //
@@ -271,13 +265,11 @@ public:
      * @brief Number of free slots remaining (walks the free-list).
      */
     unsigned remain() const {
-        // An empty or released pool has no free-list to walk; free_[tail_]
-        // would be an out-of-bounds read.
+        // An empty or released pool has no free-list to walk.
         if (size_ == 0 || free_.empty()) return 0;
         unsigned cnt  = 0;
         unsigned cur  = head_;
-        unsigned sentinel = free_[tail_];
-        while (cur != sentinel) {
+        while (cur != size_) {
             ++cnt;
             cur = free_[cur];
         }
@@ -302,7 +294,7 @@ private:
         slot_.clear();
         len_.clear();
         free_.clear();
-        head_ = tail_ = 0;
+        head_ = 0;
     }
 
     void move_from(Pool& other) noexcept {
@@ -311,14 +303,12 @@ private:
         len_      = std::move(other.len_);
         free_     = std::move(other.free_);
         head_     = other.head_;
-        tail_     = other.tail_;
         full_len_ = other.full_len_;
         size_     = other.size_;
 
         // Leave source in a safe, empty state
         other.block_    = nullptr;
         other.head_     = 0;
-        other.tail_     = 0;
         other.full_len_ = 0;
         other.size_     = 0;
     }
@@ -331,8 +321,7 @@ private:
     std::vector<T*>       slot_;     ///< slot_[i] = block_ + i*full_len_
     std::vector<unsigned> len_;      ///< Current used length of each slot
     std::vector<unsigned> free_;     ///< Linked-list "next" pointers (size n)
-    unsigned              head_;     ///< Next slot to assign (mirrors ad_flag)
-    unsigned              tail_;     ///< Last slot in free-list (mirrors ad_end)
+    unsigned              head_;     ///< Next slot to assign; size_ when the pool is full
     unsigned              full_len_; ///< Elements per slot
     unsigned              size_;     ///< Total number of slots
 };
