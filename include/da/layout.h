@@ -166,11 +166,11 @@ private:
 
     unsigned int*  order_index_;   ///< [gnd+2]
     unsigned int*  base_;          ///< [gnv * FULL_VEC_LEN]  (cumulative encoding)
-    unsigned int** prdidx_;        ///< [prdidx_rows_], prdidx_[0]==nullptr
-    /// Rows allocated in prdidx_. Fixed at construction: FULL_VEC_LEN_ is
-    /// lowered by change_order(), so freeing against it would leak the rows
-    /// above the reduced order.
-    unsigned int   prdidx_rows_;
+    unsigned int** prdidx_;        ///< [full_len at construction], prdidx_[0]==nullptr
+    /// Storage of all prdidx rows, one contiguous block (the rows point into
+    /// it): rows allocated one by one end up scattered in a fragmented heap,
+    /// which slows the multiplication kernels.
+    unsigned int*  prdidx_block_;
     unsigned int   tblsize_;       ///< Total entries in prdidx (for diagnostics)
 
     std::vector<std::vector<unsigned int>> H_;  ///< [gnv+1][gnd+2]

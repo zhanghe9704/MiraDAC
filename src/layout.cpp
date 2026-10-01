@@ -115,7 +115,7 @@ Layout::Layout(const MonomialScheme& scheme, bool build_order_table)
     , order_index_(nullptr)
     , base_(nullptr)
     , prdidx_(nullptr)
-    , prdidx_rows_(0)
+    , prdidx_block_(nullptr)
     , tblsize_(0)
     , order_table_valid_(false)
 {
@@ -135,13 +135,10 @@ Layout::~Layout()
 void Layout::free_tables()
 {
     if (prdidx_) {
-        // Free against the allocated row count, not FULL_VEC_LEN_, which
-        // change_order() may have lowered since construction.
-        for (unsigned int i = 0; i < prdidx_rows_; ++i)
-            delete[] prdidx_[i];
+        delete[] prdidx_block_;
+        prdidx_block_ = nullptr;
         delete[] prdidx_;
         prdidx_ = nullptr;
-        prdidx_rows_ = 0;
     }
     delete[] base_;
     base_ = nullptr;
@@ -158,7 +155,7 @@ Layout::Layout(Layout&& o) noexcept
     , order_index_(o.order_index_)
     , base_(o.base_)
     , prdidx_(o.prdidx_)
-    , prdidx_rows_(o.prdidx_rows_)
+    , prdidx_block_(o.prdidx_block_)
     , tblsize_(o.tblsize_)
     , H_(std::move(o.H_))
     , order_table_valid_(o.order_table_valid_)
@@ -168,7 +165,7 @@ Layout::Layout(Layout&& o) noexcept
     o.order_index_ = nullptr;
     o.base_        = nullptr;
     o.prdidx_      = nullptr;
-    o.prdidx_rows_ = 0;
+    o.prdidx_block_ = nullptr;
     o.FULL_VEC_LEN_ = 0;
 }
 
@@ -184,7 +181,7 @@ Layout& Layout::operator=(Layout&& o) noexcept
         order_index_       = o.order_index_;
         base_              = o.base_;
         prdidx_            = o.prdidx_;
-        prdidx_rows_       = o.prdidx_rows_;
+        prdidx_block_      = o.prdidx_block_;
         tblsize_           = o.tblsize_;
         H_                 = std::move(o.H_);
         order_table_valid_ = o.order_table_valid_;
@@ -194,7 +191,7 @@ Layout& Layout::operator=(Layout&& o) noexcept
         o.order_index_ = nullptr;
         o.base_        = nullptr;
         o.prdidx_      = nullptr;
-        o.prdidx_rows_ = 0;
+        o.prdidx_block_ = nullptr;
         o.FULL_VEC_LEN_ = 0;
     }
     return *this;
@@ -324,8 +321,17 @@ void Layout::init_prod_index()
     // Indices from order_index[nd] to fvl-1 correspond to highest-order monomials
     // whose products always exceed the truncation order -- they are set to nullptr.
     prdidx_ = new unsigned int*[fvl];
-    prdidx_rows_ = fvl;
     for (unsigned int i = 0; i < fvl; ++i) prdidx_[i] = nullptr;
+
+    // Row i holds M = order_index[nd - ord(i) + 1] entries; all rows share
+    // one block (see prdidx_block_).
+    size_t total = 0;
+    for (size_t i = 1, o = 1; i < order_index_[nd]; ++i) {
+        if (order_index_[o + 1] <= i) ++o;
+        total += order_index_[nd - o + 1];
+    }
+    prdidx_block_ = new unsigned int[total];
+    unsigned int* next_row = prdidx_block_;
 
     unsigned int ord = 1;
     const unsigned int* pb = base_;
@@ -334,7 +340,8 @@ void Layout::init_prod_index()
     for (size_t i = 1; i < order_index_[nd]; ++i) {
         if (order_index_[ord + 1] <= i) ++ord;
         size_t M = order_index_[nd - ord + 1];
-        prdidx_[i] = new unsigned int[M];
+        prdidx_[i] = next_row;
+        next_row += M;
         NS += (unsigned int)M;
         for (size_t j = 1; j < M; ++j) {
             prdidx_[i][j] = 0;

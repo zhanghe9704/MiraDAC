@@ -193,3 +193,22 @@ TEST_CASE("change_order and restore_order", "[layout]")
     REQUIRE(lay.max_order() == 4);
     REQUIRE(lay.full_len()  == 35);
 }
+
+// The product-index rows live in one contiguous block. Rows allocated one by
+// one end up scattered in a fragmented heap (any Julia process), which made
+// the multiplication kernels 10-14% slower there.
+TEST_CASE("prdidx rows are contiguous", "[layout]")
+{
+    for (auto [nv, nd] : {std::pair{2u, 4u}, std::pair{3u, 4u}, std::pair{6u, 6u}}) {
+        Layout lay = make_layout(nv, nd);
+        unsigned int** p = lay.prdidx();
+        const unsigned int* oi = lay.order_index();
+        unsigned int ord = 1;
+        for (unsigned int i = 1; i + 1 < oi[nd]; ++i) {
+            if (oi[ord + 1] <= i) ++ord;
+            const unsigned int row_len = oi[nd - ord + 1];
+            INFO("nv=" << nv << " nd=" << nd << " row " << i);
+            REQUIRE(p[i + 1] == p[i] + row_len);
+        }
+    }
+}
