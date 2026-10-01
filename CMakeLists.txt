@@ -12,6 +12,7 @@ option(DA_IGNORE_SYMENGINE_PIN
 option(DA_BUILD_TESTS "Build C++ tests" ON)
 option(DA_BUILD_EXAMPLES "Build examples" ON)
 option(DA_BUILD_BENCH "Build the C++ baseline benchmark for the Python binding" OFF)
+option(DA_BUILD_CAPI "Build the C API library miradac_c" OFF)
 set(DA_CHECK_ENV 1 CACHE STRING "Enable env guard (1=on, 0=off)")
 
 # A Python build (scikit-build-core) links daStatic into a shared module, so it
@@ -20,6 +21,11 @@ if(SKBUILD)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
     set(DA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(DA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+endif()
+
+# The C API links daStatic into a shared library, so it needs PIC too.
+if(DA_BUILD_CAPI)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 endif()
 
 # NOTE: DA_CHECK_ENV and DA_WITH_SYMBOLIC are applied below as PUBLIC compile
@@ -145,6 +151,11 @@ endif()
 # --- Benchmark (C++ baseline for the Python binding) ---
 if(DA_BUILD_BENCH)
     add_subdirectory(python/bench)
+endif()
+
+# --- C API (for the Julia binding) ---
+if(DA_BUILD_CAPI)
+    add_subdirectory(capi)
 endif()
 
 # --- Python module ---

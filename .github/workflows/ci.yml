@@ -118,3 +118,44 @@ jobs:
           .venv/bin/pip install nanobind scikit-build-core pytest numpy sympy mypy
           .venv/bin/pip install --no-build-isolation .
           .venv/bin/pytest python/tests -q
+
+  julia:
+    name: Julia ${{ matrix.julia }} (C API + MiraDAC.jl)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        julia: [ "1.10", "1" ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ ninja-build libgmp-dev
+
+      - name: Cache the pinned SymEngine
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/opt
+          key: symengine-${{ runner.os }}-${{ hashFiles('cmake/symengine_pin.txt', 'scripts/setup_symengine.sh') }}
+
+      - name: Pinned SymEngine
+        run: |
+          scripts/setup_symengine.sh --no-python --print-env \
+            | sed 's/^export //' >> "$GITHUB_ENV"
+
+      - name: Configure + build (C API)
+        run: |
+          cmake -S . -B build -G Ninja -DDA_BUILD_CAPI=ON -DSymEngine_DIR="$SymEngine_DIR"
+          cmake --build build -j2
+
+      - name: C API tests
+        run: ctest --test-dir build -R capi --output-on-failure
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ matrix.julia }}
+
+      - name: Julia package tests
+        run: |
+          julia julia/dev_setup.jl
+          julia --project=julia/MiraDAC -e 'using Pkg; Pkg.test()'

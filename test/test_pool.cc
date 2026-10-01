@@ -309,6 +309,16 @@ TEST_CASE("Pool<double> free after exhaustion recycles the slot", "[pool][double
     REQUIRE(x != z);
 }
 
+TEST_CASE("Pool exhaustion throws da::PoolExhausted", "[pool][double]") {
+    da::Pool<double> p;
+    p.reserve(35, 2);
+    p.assign();
+    p.assign();
+    REQUIRE_THROWS_AS(p.assign(), da::PoolExhausted);
+    REQUIRE_THROWS_AS(p.alloc(), std::runtime_error);
+    REQUIRE_THROWS_WITH(p.assign(), "Pool::assign: Run out of vectors");
+}
+
 // ===========================================================================
 // A slot from assign()/alloc() is always zero, whichever data it held before
 // it was freed. Doubles are zeroed when the slot is handed out (it is about to
