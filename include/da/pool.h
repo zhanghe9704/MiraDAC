@@ -113,7 +113,7 @@ public:
     }
 
     /**
-     * @brief Pop the next free slot.  Returns its index.  Sets len_[i] = 0.
+     * @brief Pop the next free slot.  Returns its index.  Sets len_[i] = 0; the slot is all zero.
      *
      * Throws std::runtime_error on exhaustion.
      * (Reference: "Run out of vectors" + exit(-1).)
@@ -126,16 +126,21 @@ public:
         unsigned i = head_;
         len_[i]    = 0;
         head_      = free_[i];  // advance head (mirrors: ad_flag = adlist[ad_flag])
+        // A slot handed out is zero. Doubles are zeroed here, where the slot is
+        // about to be written; non-trivial types were cleared by free(). Zeroing
+        // doubles in free() instead touched slots that had long gone cold when
+        // frees come late (a garbage-collected caller such as Julia).
+        if constexpr (std::is_trivially_copyable_v<T>)
+            zero_slot(slot_[i]);
         return i;
     }
 
     /**
-     * @brief Like assign(), but also zeros the slot and sets len = 1.
+     * @brief Like assign(), but also sets len = 1 (the slot is zero, as from assign()).
      * (Port of ad_alloc semantics.)
      */
     unsigned alloc() {
         unsigned i = assign();
-        zero_slot(slot_[i]);
         len_[i] = 1;
         return i;
     }
@@ -144,11 +149,14 @@ public:
      * @brief Return slot i to the free-list (O(1)).
      * (Port of ad_free — appends to the tail.)
      *
-     * Zeros the slot and resets its length before recycling.
+     * Non-trivial elements are cleared at once; doubles are zeroed by the next assign().
      */
     void free(unsigned i) {
         if (size_ == 0) return;  // pool already destroyed; no-op
-        reset(i);
+        if constexpr (std::is_trivially_copyable_v<T>)
+            len_[i] = 0;         // zeroed by the next assign()
+        else
+            reset(i);            // release the elements' resources now
         // Append i to the tail of the free-list; its "next" is the sentinel.
         free_[i] = size_;
         if (head_ == size_)

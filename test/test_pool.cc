@@ -308,3 +308,38 @@ TEST_CASE("Pool<double> free after exhaustion recycles the slot", "[pool][double
     REQUIRE(y != z);
     REQUIRE(x != z);
 }
+
+// ===========================================================================
+// A slot from assign()/alloc() is always zero, whichever data it held before
+// it was freed. Doubles are zeroed when the slot is handed out (it is about to
+// be written, so the cache is warm); non-trivial types are cleared when the
+// slot is freed, so their resources (e.g. SymEngine references) go at once.
+// ===========================================================================
+TEST_CASE("Pool<double> reused slot comes back zero", "[pool][double]") {
+    da::Pool<double> p;
+    p.reserve(8, 2);
+    unsigned a = p.alloc();
+    for (unsigned k = 0; k < 8; ++k) p.slot(a)[k] = 1.0 + k;
+    p.set_len(a, 8);
+    p.free(a);
+    unsigned b = p.assign();
+    unsigned c = p.assign();
+    for (unsigned s : {b, c})
+        for (unsigned k = 0; k < 8; ++k) REQUIRE(p.slot(s)[k] == 0.0);
+    REQUIRE(p.len(b) == 0);
+    p.free(b);
+    unsigned d = p.alloc();
+    for (unsigned k = 0; k < 8; ++k) REQUIRE(p.slot(d)[k] == 0.0);
+    REQUIRE(p.len(d) == 1);
+}
+
+TEST_CASE("Pool<string> free releases the elements at once", "[pool][string]") {
+    da::Pool<std::string> p;
+    p.reserve(4, 2);
+    unsigned a = p.alloc();
+    p.slot(a)[2] = std::string(1000, 'x');
+    p.free(a);
+    for (unsigned k = 0; k < 4; ++k) REQUIRE(p.slot(a)[k].empty());
+    unsigned b = p.alloc();
+    for (unsigned k = 0; k < 4; ++k) REQUIRE(p.slot(b)[k].empty());
+}
