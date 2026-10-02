@@ -157,13 +157,13 @@ mutable struct SDA
     ptr::Handle
     function SDA(p::Handle)
         v = new(p)
-        return finalizer(sda_finalizer, v)
+        return adopt!(v)     # a finalizer, or the current dascope
     end
 end
 
 sda_finalizer(v::SDA) = defer_free(SDA_QUEUE, v)
 
-Base.unsafe_convert(::Type{Handle}, v::SDA) = v.ptr
+Base.unsafe_convert(::Type{Handle}, v::SDA) = handle(v)
 op_env(v::SDA) = mdac_sda_env(v)
 
 # A new SDA from the allocating C call f(out) in the env of x; d as in alloc_call.
@@ -272,6 +272,7 @@ function to_string(v::SDA)
 end
 
 function Base.show(io::IO, v::SDA)
+    getfield(v, :ptr) == C_NULL && return print(io, "SDA(freed)")   # by its dascope
     e = env(v)
     if e.retired
         print(io, "SDA(cleared env)")
@@ -281,6 +282,7 @@ function Base.show(io::IO, v::SDA)
 end
 
 function Base.show(io::IO, m::MIME"text/plain", v::SDA)
+    getfield(v, :ptr) == C_NULL && return print(io, "SDA(freed)")   # by its dascope
     env(v).retired ? show(io, v) : print(io, to_string(v))
 end
 
@@ -356,13 +358,13 @@ mutable struct SDAList <: AbstractVector{SDA}
     ptr::Handle
     function SDAList(p::Handle)
         l = new(p)
-        return finalizer(slist_finalizer, l)
+        return adopt!(l)     # a finalizer, or the current dascope
     end
 end
 
 slist_finalizer(l::SDAList) = defer_free(SLIST_QUEUE, l)
 
-Base.unsafe_convert(::Type{Handle}, l::SDAList) = l.ptr
+Base.unsafe_convert(::Type{Handle}, l::SDAList) = handle(l)
 op_env(l::SDAList) = mdac_sdalist_env(l)
 
 function new_slist(f, x)
@@ -380,7 +382,7 @@ end
 
 function SDAList(v::AbstractVector{SDA})
     isempty(v) && return SDAList()
-    ptrs = Handle[x.ptr for x in v]
+    ptrs = Handle[handle(x) for x in v]
     GC.@preserve v new_slist(o -> mdac_sdalist_from(ptrs, length(ptrs), o), first(v))
 end
 

@@ -17,13 +17,13 @@ mutable struct CSDA
     ptr::Handle
     function CSDA(p::Handle)
         v = new(p)
-        return finalizer(csda_finalizer, v)
+        return adopt!(v)     # a finalizer, or the current dascope
     end
 end
 
 csda_finalizer(v::CSDA) = defer_free(CSDA_QUEUE, v)
 
-Base.unsafe_convert(::Type{Handle}, v::CSDA) = v.ptr
+Base.unsafe_convert(::Type{Handle}, v::CSDA) = handle(v)
 op_env(v::CSDA) = mdac_csda_env(v)
 
 # A new CSDA from the allocating C call f(out) in the env of x; d as in alloc_call.
@@ -74,6 +74,7 @@ function to_string(v::CSDA)
 end
 
 function Base.show(io::IO, v::CSDA)
+    getfield(v, :ptr) == C_NULL && return print(io, "CSDA(freed)")   # by its dascope
     e = env(v)
     if e.retired
         print(io, "CSDA(cleared env)")
@@ -84,6 +85,7 @@ function Base.show(io::IO, v::CSDA)
 end
 
 function Base.show(io::IO, m::MIME"text/plain", v::CSDA)
+    getfield(v, :ptr) == C_NULL && return print(io, "CSDA(freed)")   # by its dascope
     env(v).retired ? show(io, v) : print(io, to_string(v))
 end
 
@@ -156,13 +158,13 @@ mutable struct CSDAList <: AbstractVector{CSDA}
     ptr::Handle
     function CSDAList(p::Handle)
         l = new(p)
-        return finalizer(cslist_finalizer, l)
+        return adopt!(l)     # a finalizer, or the current dascope
     end
 end
 
 cslist_finalizer(l::CSDAList) = defer_free(CSLIST_QUEUE, l)
 
-Base.unsafe_convert(::Type{Handle}, l::CSDAList) = l.ptr
+Base.unsafe_convert(::Type{Handle}, l::CSDAList) = handle(l)
 op_env(l::CSDAList) = mdac_csdalist_env(l)
 
 function new_cslist(f, x)
@@ -180,7 +182,7 @@ end
 
 function CSDAList(v::AbstractVector{CSDA})
     isempty(v) && return CSDAList()
-    ptrs = Handle[x.ptr for x in v]
+    ptrs = Handle[handle(x) for x in v]
     GC.@preserve v new_cslist(o -> mdac_csdalist_from(ptrs, length(ptrs), o), first(v))
 end
 

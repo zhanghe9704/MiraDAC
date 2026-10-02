@@ -11,14 +11,13 @@ are defined explicitly, with in-place forms (`add!`, `exp!`, ...) for hot loops.
 mutable struct NDA
     ptr::Handle
     function NDA(p::Handle)
-        v = new(p)
-        return finalizer(nda_finalizer, v)
+        return adopt!(new(p))     # a finalizer, or the current dascope
     end
 end
 
 nda_finalizer(v::NDA) = defer_free(NDA_QUEUE, v)
 
-Base.unsafe_convert(::Type{Handle}, v::NDA) = v.ptr
+Base.unsafe_convert(::Type{Handle}, v::NDA) = handle(v)
 op_env(v::NDA) = mdac_nda_env(v)
 op_env(e::DAEnv) = getfield(e, :ptr)
 
@@ -133,6 +132,7 @@ function to_string(v::NDA)
 end
 
 function Base.show(io::IO, v::NDA)
+    getfield(v, :ptr) == C_NULL && return print(io, "NDA(freed)")   # by its dascope
     e = env(v)
     if e.retired
         print(io, "NDA(cleared env)")
@@ -142,6 +142,7 @@ function Base.show(io::IO, v::NDA)
 end
 
 function Base.show(io::IO, m::MIME"text/plain", v::NDA)
+    getfield(v, :ptr) == C_NULL && return print(io, "NDA(freed)")   # by its dascope
     env(v).retired ? show(io, v) : print(io, to_string(v))
 end
 

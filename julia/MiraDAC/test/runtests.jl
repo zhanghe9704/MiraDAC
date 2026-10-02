@@ -28,4 +28,5 @@ using Test
     include("test_multienv.jl")
     include("test_memory.jl")
     include("test_examples.jl")
+    include("test_scope.jl")
 end

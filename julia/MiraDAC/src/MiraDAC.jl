@@ -19,6 +19,7 @@ export NDAList, der, integ, substitute, compose, inv_map, evaluate_map, exponent
 export CNDA, CNDAList
 export SymExpr, dasymbols, simplify, SDA, sdavar, promote_sda, SDAList, evaluate
 export CSDA, CSDAList
+export dascope, keep!, FreedObjectError
 
 # Bumped together with MDAC_ABI_VERSION in capi/include/miradac.h.
 const ABI_VERSION = 1
@@ -50,6 +51,7 @@ include("algorithms.jl")
 include("cnda.jl")
 include("symbolic.jl")
 include("csda.jl")
+include("scope.jl")
 
 # A literal exponent (`x^-1`) would otherwise call `inv`, which these types do not have.
 Base.literal_pow(::typeof(^), x::Union{NDA,CNDA,SymExpr,SDA,CSDA}, ::Val{p}) where {p} = x^p
