@@ -10,6 +10,7 @@ module MiraDAC
 using Libdl
 using LinearAlgebra
 using Preferences
+using MiraDAC_jll
 
 export MiraDACError, EnvError, PoolExhaustedError
 export DAEnv, init!, clear!, current_env, default_env, with_env, with_order, get_eps, set_eps!
@@ -25,7 +26,10 @@ export dascope, keep!, FreedObjectError
 const ABI_VERSION = 1
 
 # A constant, so `ccall` resolves it once; changing the preference recompiles the package.
-const libmiradac = @load_preference("libmiradac", "")
+# The "libmiradac" preference (development builds) overrides the library of MiraDAC_jll.
+const libmiradac = let path = @load_preference("libmiradac", "")
+    !isempty(path) ? path : MiraDAC_jll.is_available() ? MiraDAC_jll.libmiradac_c : ""
+end
 
 """
     set_library!(path)
@@ -64,10 +68,9 @@ for fn in NDA_FUNCS
 end
 
 function __init__()
-    isempty(libmiradac) && error("MiraDAC: no C API library configured. Run " *
-        "`julia julia/dev_setup.jl` in a MiraDAC checkout after building with " *
-        "-DDA_BUILD_CAPI=ON, or set the \"libmiradac\" preference of MiraDAC to the path " *
-        "of libmiradac_c.")
+    isempty(libmiradac) && error("MiraDAC: MiraDAC_jll has no library for this platform. " *
+        "Build libmiradac_c from a MiraDAC checkout with -DDA_BUILD_CAPI=ON and run " *
+        "`julia julia/dev_setup.jl`, or set the \"libmiradac\" preference of MiraDAC to its path.")
     Libdl.dlopen(libmiradac; throw_error=false) === nothing &&
         error("MiraDAC: cannot load the C API library $libmiradac")
     abi = mdac_abi_version()

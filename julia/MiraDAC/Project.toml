@@ -5,6 +5,7 @@ version = "1.1.0"
 [deps]
 Libdl = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+MiraDAC_jll = "3da24879-70b1-546a-a007-7ebf43218072"
 Preferences = "21216c6a-2e73-6563-6e65-726566657250"
 
 [weakdeps]
@@ -14,6 +15,7 @@ SymEngine = "123dc426-2d89-5057-bbad-38513e3affd8"
 MiraDACSymEngineExt = "SymEngine"
 
 [compat]
+MiraDAC_jll = "1.1"
 Preferences = "1"
 SymEngine = "0.13"
 julia = "1.10"

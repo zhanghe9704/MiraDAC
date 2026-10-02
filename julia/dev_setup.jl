@@ -4,7 +4,19 @@
 # Run: julia julia/dev_setup.jl  (any active project)
 using Pkg
 pkg = joinpath(@__DIR__, "MiraDAC")
+# Until MiraDAC_jll is registered (plan T9.2), its local build (julia/binarybuilder/README.md)
+# must be put in each environment: MIRADAC_JLL=/path/to/MiraDAC_jll julia julia/dev_setup.jl
+# Only the (untracked) Manifest.toml keeps it: on Julia >= 1.11 `develop` also writes a
+# machine-local [sources] path into the tracked Project.toml, which is restored here.
+function jll()
+    haskey(ENV, "MIRADAC_JLL") || return
+    project = Base.active_project()
+    saved = read(project, String)
+    Pkg.develop(path=ENV["MIRADAC_JLL"])
+    write(project, saved)
+end
 Pkg.activate(pkg)
+jll()
 Pkg.instantiate()
 
 using Preferences, UUIDs
@@ -17,6 +29,7 @@ set_preferences!(uuid, "libmiradac" => lib; force=true)
 # needs Julia >= 1.11; `develop` gives Julia 1.10 the same path dependency.
 for sub in ("bench", "docs")
     Pkg.activate(joinpath(pkg, sub))
+    jll()
     VERSION < v"1.11" && Pkg.develop(path=pkg)
     Pkg.instantiate()
     set_preferences!(uuid, "libmiradac" => lib; force=true)
