@@ -1058,6 +1058,21 @@ BinaryBuilder.jl (Docker) and test the tarball with the Julia suite.
     on Windows. `-Wl,--exclude-libs,ALL` and the version script `capi/src/exports.map` are GNU ld
     options, so `capi/CMakeLists.txt` may need a branch for Apple ld (`-exported_symbols_list`) and
     for MinGW. That is a CMake change, to be planned there.
+- *As built (second step, `aarch64-apple-darwin` + `x86_64-apple-darwin`, 2026-10-02, branch
+  `zhanghe9704/jll-macos`):* the CMake change above is in (`capi/CMakeLists.txt` compiles the C API
+  sources as an OBJECT library and links with `-Wl,-exported_symbols_list,<generated list>`; the
+  list comes from `nm -U` over the objects, since most of the API is declared through macros in
+  `miradac.h` — the header cannot be parsed). The numeric-only cross-check compiled both targets
+  with Clang 18/libc++ with zero warnings and no source change; an include-hygiene commit added
+  direct `<algorithm>`/`<utility>`/`<type_traits>` includes (libc++ prunes transitive ones). The
+  recipe's audit is per format now: `nm -gU` and the `_mdac_` pattern on darwin (the sandbox nm is
+  cctools nm: no `-D`, no `--defined-only`), `nm -D --defined-only` and `mdac_` elsewhere. Both
+  darwin legs build the full symbolic recipe (static SymEngine + `GMP_jll`, ~5 min each) and pass
+  the audit: 561 `mdac_*` exports, nothing else, install name `@rpath/libmiradac_c.dylib`,
+  `@rpath/libgmp.10.dylib` the only non-runtime dependency. The darwin builds need
+  `BINARYBUILDER_AUTOMATIC_APPLE=true` (Apple SDK terms) and the MiraDAC GitSource at a commit
+  with the per-linker capi CMake (after v1.1.0); they were verified with the recipe driven against
+  a `DirectorySource` of the branch. Runtime tests are for the machines that can run them.
 
 **T9.2 `MiraDAC_jll`.** Submit the recipe to Yggdrasil (from the user's GitHub account); once
 merged, make `MiraDAC_jll` the default library in `src/MiraDAC.jl` (the preference still

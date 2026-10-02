@@ -2,10 +2,10 @@
 
 `build_tarballs.jl` builds `libmiradac_c` (the C API) of the tagged MiraDAC commit with the pinned
 SymEngine (`cmake/symengine_pin.txt`) linked statically and hidden, and GMP from `GMP_jll`
-(DEVELOPMENT_PLAN_JULIA.md, T9.1). The tarball holds `lib/libmiradac_c.so`, `include/miradac.h`
-and the license.
+(DEVELOPMENT_PLAN_JULIA.md, T9.1). Platforms: `x86_64-linux-gnu` and `aarch64`/`x86_64`
+Apple. The tarball holds `lib/libmiradac_c.{so,dylib}`, `include/miradac.h` and the license.
 
-## Local build (x86_64-linux-gnu)
+## Local build (all platforms)
 
 ```sh
 S=/tmp/miradac-jll                     # any scratch directory
@@ -13,10 +13,16 @@ mkdir -p $S/bbenv $S/depot
 export JULIA_DEPOT_PATH=$S/depot:$HOME/.julia   # shards, artifacts and the JLL go to $S/depot
 export BINARYBUILDER_RUNNER=userns     # needs unprivileged user namespaces; "docker" also
                                        # works but runs `sudo chown` after each step
+export BINARYBUILDER_AUTOMATIC_APPLE=true  # accept the Apple SDK terms; needed for the
+                                           # macOS legs (first darwin build downloads the SDK)
 julia --project=$S/bbenv -e 'using Pkg; Pkg.add("BinaryBuilder")'
 cd $S && julia --project=$S/bbenv /path/to/MiraDAC/julia/binarybuilder/build_tarballs.jl \
-    --verbose --deploy=local
+    --verbose --deploy=local           # add a platform triplet to build one leg only, e.g.
+                                       # aarch64-apple-darwin
 ```
+
+If `/tmp` is tight, also `export TMPDIR=<dir-on-a-big-disk>`: the first darwin build stages
+gigabytes of toolchain and SDK downloads through it.
 
 Tarballs land in `$S/products/`, the JLL package in `$S/depot/dev/MiraDAC_jll` (the first depot's
 `dev/`; `JULIA_PKG_DEVDIR` is not used).
