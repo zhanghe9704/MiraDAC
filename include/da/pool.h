@@ -37,6 +37,7 @@
 #include <stdexcept>
 #include <type_traits>
 #include <cmath>     // std::abs
+#include <utility>   // std::move
 
 namespace da {
 

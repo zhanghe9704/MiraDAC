@@ -29,6 +29,7 @@
 #include <set>
 #include <fstream>
 #include <sstream>
+#include <type_traits>
 #include <algorithm>
 #include <limits>
 #include <cmath>
