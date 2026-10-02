@@ -453,6 +453,76 @@ e.close()                                       # q now raises EnvError on use
 - The stub `python/miradac/_core.pyi` is generated; after changing a binding, regenerate it with
   the command at the top of `python/stubgen_patterns.txt` (a test fails while it is stale).
 
+## Julia
+
+The package `MiraDAC.jl` (`julia/MiraDAC`) binds NDA, CNDA, SDA, CSDA and the multi-environment
+API through a C API library, `libmiradac_c` (`capi/`), called with `ccall`. In-place operations
+add a few tens of nanoseconds to the C++ time (see `julia/MiraDAC/bench/REPORT.md`). It needs
+Julia 1.10 or later.
+
+### Build
+
+```bash
+eval "$(scripts/setup_symengine.sh --print-env)"    # pinned SymEngine (see above)
+cmake -S . -B build -G Ninja -DDA_BUILD_CAPI=ON -DSymEngine_DIR="$SymEngine_DIR"
+cmake --build build                                  # -> build/capi/libmiradac_c.so
+ctest --test-dir build -R capi                       # C API tests
+julia julia/dev_setup.jl                             # points MiraDAC.jl at that library
+julia --project=julia/MiraDAC -e 'using Pkg; Pkg.test()'
+```
+
+`julia/dev_setup.jl` stores the library path as the package's `libmiradac` preference
+(`julia/MiraDAC/LocalPreferences.toml`, also in the `bench` and `docs` environments);
+`MiraDAC.set_library!(path)` changes it later. A numeric-only library (`-DWITH_SYMBOLIC=OFF`,
+no SymEngine) works too: `MiraDAC.HAS_SYMBOLIC` is then `false` and the symbolic tests are
+skipped. The documentation (Documenter.jl) builds with
+`julia --project=julia/MiraDAC/docs julia/MiraDAC/docs/make.jl` into `julia/MiraDAC/docs/build`.
+
+### Example
+
+```julia
+using MiraDAC
+
+init!(4, 3, 10_000)                           # default env: order 4, 3 variables, 10 000 slots
+x = 1.0 + davar(1) + 2davar(2)                # NDA; variables are 1-based
+y = exp(x); add!(y, y, x * x)                 # in place: y = y + x*x, no new slot
+z = with_order(2) do                          # temporary truncation, nests correctly
+    sin(y)
+end
+c = CNDA(x, y); w = exp(c)                    # complex numeric
+a, b = dasymbols("a b")                       # SymExpr
+s = a * sdavar(1) + SDA(1.5)                  # SDA
+v = evaluate(exp(s), Dict(a => 0.3))          # -> NDA
+m = NDAList([x, y, z]); pts = rand(3, 10_000) # points as columns
+out = evaluate_map(m, pts)                    # 3×10000 Matrix, one C++ loop
+
+e = DAEnv(10, 2, 500)                         # second env; does not change the current env
+q = with_env(e) do
+    davar(1) * davar(2)                       # lives in e
+end
+f = DAEnv(4, 3, 100)
+x2 = import_vec(f, x)                         # copy into f (ArgumentError if layouts differ)
+close(e)                                      # q now throws EnvError on use
+```
+
+`julia/MiraDAC/examples/` holds Julia ports of the C++ examples; every exported name has a
+docstring (`?NDA`).
+
+### Notes
+
+- **Pool and GC.** A DA vector takes a slot in its env's fixed-size pool, and Julia frees it
+  only when the garbage collector finalizes it. When a pool is full, an operation runs the GC
+  and retries; `PoolExhaustedError` means more vectors are reachable than the pool holds. Size
+  pools generously (each retry costs a young collection, ~100 µs) and use the in-place forms
+  `add! sub! mul! div!` and `exp!(out, a)`, `sin!`, … in hot loops: they take no new slot.
+- **Threads.** One env may be used by one Julia thread at a time (the C++ pools have no locks);
+  different threads may use different envs. Symbolic objects are for one thread at a time.
+- Every operation runs in the env of its first DA operand. Vectors of different envs in one
+  operation, or of a closed or cleared env, throw `EnvError`.
+- Indices are 1-based: `davar(1)` is the first variable. DA types are not `Number`s.
+- With SymEngine.jl loaded, `SymExpr(::SymEngine.Basic)` and `SymEngine.Basic(::SymExpr)`
+  convert through strings (the two use different SymEngine libraries).
+
 ## API summary
 
 | Reference (numerical) | New (da::) |

@@ -1,0 +1,9 @@
+[deps]
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+MiraDAC = "df7fbf13-9219-47b3-ad1a-83c9c7825a93"
+
+[sources]
+MiraDAC = {path = ".."}
+
+[compat]
+Documenter = "1"

@@ -26,8 +26,8 @@
  *     memset/memcpy are NEVER used on the non-POD path to avoid
  *     corrupting reference counts (e.g. SymEngine::Expression).
  *
- * @note assign() throws std::runtime_error when exhausted (the
- *   reference printed "Run out of vectors" and called exit(-1)).
+ * @note assign() throws da::PoolExhausted (a std::runtime_error) when
+ *   exhausted (the reference printed "Run out of vectors" and called exit(-1)).
  */
 
 #pragma once
@@ -39,6 +39,12 @@
 #include <cmath>     // std::abs
 
 namespace da {
+
+/// Thrown by Pool::assign() (and so by every DA constructor) when the pool
+/// has no free slot left.
+struct PoolExhausted : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
 
 template<class T>
 class Pool {
@@ -116,12 +122,12 @@ public:
     /**
      * @brief Pop the next free slot.  Returns its index.  Sets len_[i] = 0; the slot is all zero.
      *
-     * Throws std::runtime_error on exhaustion.
+     * Throws PoolExhausted on exhaustion.
      * (Reference: "Run out of vectors" + exit(-1).)
      */
     unsigned assign() {
         if (head_ == size_) {
-            throw std::runtime_error("Pool::assign: Run out of vectors");
+            throw PoolExhausted("Pool::assign: Run out of vectors");
         }
         unsigned i = head_;
         len_[i]    = 0;
