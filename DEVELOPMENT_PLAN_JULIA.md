@@ -136,6 +136,76 @@ in the C API; the Julia layer passes the current env).
 5. **Threads.** One env may be used by one Julia thread at a time (the C++ pools have no locks);
    different threads may use different envs. Documented, not enforced.
 
+### A.5b Scopes (`dascope`, `keep!`) — branch `julia-alloc-scope`
+
+**Why.** Outside a scope an allocating operation (`a + b`, `exp(a)`) pays (1) a Julia object, a
+finalizer registration and the deferred free (~150–350 ns), and (2) a cold pool slot: Julia frees
+a result only after a GC, so a new result never reuses the warm slot just freed, as C++ does since
+`efc0f70` (most recently freed slot first); at (6,10) a 64 KB slot is zeroed cold, ~1 µs.
+
+**Design (fixed by the user).**
+
+1. `dascope(f)` / `dascope() do … end` runs `f` and returns its value.
+2. Every `NDA`, `CNDA`, `NDAList`, `CNDAList` created while a scope is active on the current task
+   is registered in the innermost scope (SDA/CSDA join when they exist). The scope stack is
+   task-local (`task_local_storage`, works on Julia ≥ 1.10).
+3. Such objects get no finalizer. At scope exit — return or exception — every registered object
+   that is not kept is freed at once through `mdac_*_free` and invalidated (`ptr = C_NULL`).
+4. Kept: objects reachable from the return value (itself, or inside `Tuple`, `NamedTuple`,
+   `AbstractArray`, `AbstractDict` values, recursively) and objects passed to `keep!(x)`. A kept
+   object moves to the enclosing scope; at the outermost scope it gets its deferred-free
+   finalizer and is left to the GC.
+5. Using a freed object throws `MiraDAC.FreedObjectError` ("return it from the dascope block or
+   call keep!(x)"). The check is one pointer comparison in `unsafe_convert(Handle, x)`, which
+   every `ccall` and the list constructors use; C never sees `C_NULL`.
+6. Scopes nest; an exception frees everything not kept and is rethrown.
+7. Outside any scope nothing changes (finalizer, deferred free, retry). In-place operations
+   create no objects.
+8. Exported: `dascope`, `keep!`, `FreedObjectError`; user docs in `julia/MiraDAC/README.md`
+   ("Scopes").
+
+**As built** (`julia/MiraDAC/src/scope.jl`, no C API change):
+
+- Every inner constructor ends in `adopt!(new(p))`: if no scope is active it attaches the
+  finalizer, otherwise it pushes the object onto the scope's vector for its type (one typed
+  `Vector` per type, so freeing needs no dynamic dispatch).
+- A global `ACTIVE_SCOPES` atomic counts open scopes over all tasks; while it is 0, `adopt!`
+  skips the task-local lookup, so the unscoped path costs one load more than before.
+- The per-task `ScopeStack` keeps its `Scope` objects (and their vectors' capacity) for reuse:
+  entering a scope allocates nothing. The kept set (`Base.IdSet`, qualified: Base exports
+  `IdSet` only from Julia 1.11) is created only when something is kept; containers are recorded
+  in it too, which guards against cycles. Arrays of bits types are skipped, and `#undef` slots
+  of a partly filled array (`Vector{NDA}(undef, n)`) are skipped with `isassigned`. A lazy
+  array wrapper (`view`, `v'`, `reshape`, ...: any non-`Array` with `parent(x) !== x`) keeps its
+  parent instead of being indexed: indexing a view of an `NDAList` would copy the elements (new
+  pool objects) and leave the list itself unkept, and indexing `v'` calls `adjoint(::NDA)`,
+  which does not exist.
+  `test_scope.jl` passes on Julia 1.10.10 and 1.13.1.
+- Objects are freed in creation order, so the newest (warmest) slot is freed last and handed
+  out first by the pool.
+- Freeing at exit does not go through the env-aware drain of A.5: the objects belong to envs
+  this task is using, which (A.5 item 5) no other thread uses at the same time.
+- A scope's objects stay allocated until it ends, so a scope around a loop of N operations needs
+  N slots: put the scope inside the loop (or around batches) and carry results in place
+  (`add!(x, x * 0.5, davar(1))`). `test_scope.jl` checks 100 000 operations in scopes with a pool
+  of 64: no retry, `count` back to baseline.
+
+**Benchmark** (`bench_ops.jl --scoped`): the allocating cases (`add`, `mul`, `mul_const`, `exp`,
+`cmul`, `cexp`, `composition`) also run as `scoped_*`, one `dascope` per batch of 16 operations
+(`--batch N`). Strict rule for them: overhead ≤ 150 ns when C++ < 1 µs, ratio ≤ 1.10 when
+C++ ≥ 1 µs. Results: `julia/MiraDAC/bench/REPORT.md`, section "A.5b". There are 21 scoped
+cases (7 operations × 3 sizes). All 21 pass the strict rule in both recorded runs (core 3, load
+average 1.8–4.3) and in both of an independent verifier's runs. The script prints the A.5b
+(scoped) and A.9 (unscoped) gates on separate lines and exits 1 if either fails.
+
+The unscoped `n6o6` allocating cases sit at the A.9 limit (+294 to +439 ns against 400), and
+whether they pass depends on load: one recorded run passes, one fails on `n6o6/mul_const` (+424 ns),
+and both verifier runs fail on `n6o6/add`. An A/B against HEAD shows the same times. The cause is
+not in the binding: raw C calls show that a result in a cold slot (unscoped Julia frees only after
+a GC) costs 250–300 ns more than one in a warm slot at n6o6. Item 7 keeps that behaviour outside a
+scope, and the fix is `dascope` itself. The A.9 allowance for unscoped allocating operations is a
+user decision and is not changed here.
+
 ### A.6 Julia API (target)
 
 - **1-based indices** everywhere in Julia: `davar(1)` is the first variable, coefficient index 1

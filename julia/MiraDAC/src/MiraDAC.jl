@@ -9,6 +9,7 @@ export DAEnv, init!, clear!, current_env, default_env, with_order, get_eps, set_
 export NDA, davar, con, coeffs, coeff, nterms, erf, add!, sub!, mul!, div!
 export NDAList, der, integ, substitute, compose, inv_map, evaluate_map, exponents
 export CNDA, CNDAList
+export dascope, keep!, FreedObjectError
 
 # Bumped together with MDAC_ABI_VERSION in capi/include/miradac.h.
 const ABI_VERSION = 1
@@ -38,6 +39,7 @@ include("env.jl")
 include("nda.jl")
 include("algorithms.jl")
 include("cnda.jl")
+include("scope.jl")
 
 for fn in NDA_FUNCS
     @eval export $(Symbol(fn, :!))

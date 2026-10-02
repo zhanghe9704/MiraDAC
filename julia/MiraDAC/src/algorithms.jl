@@ -12,14 +12,13 @@ a map accept a plain `Vector{NDA}` too, copied into a temporary `NDAList`.
 mutable struct NDAList <: AbstractVector{NDA}
     ptr::Handle
     function NDAList(p::Handle)
-        l = new(p)
-        return finalizer(list_finalizer, l)
+        return adopt!(new(p))     # a finalizer, or the current dascope
     end
 end
 
 list_finalizer(l::NDAList) = defer_free(LIST_QUEUE, l)
 
-Base.unsafe_convert(::Type{Handle}, l::NDAList) = l.ptr
+Base.unsafe_convert(::Type{Handle}, l::NDAList) = handle(l)
 op_env(l::NDAList) = mdac_ndalist_env(l)
 
 # A new NDAList from the allocating C call f(out) in the env of x.
@@ -38,7 +37,7 @@ end
 
 function NDAList(v::AbstractVector{NDA})
     isempty(v) && return NDAList()
-    ptrs = Handle[x.ptr for x in v]
+    ptrs = Handle[handle(x) for x in v]
     GC.@preserve v new_list(o -> mdac_ndalist_from(ptrs, length(ptrs), o), first(v))
 end
 

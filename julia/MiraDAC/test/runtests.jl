@@ -14,4 +14,5 @@ using Test
     include("test_cnda.jl")
     include("test_env.jl")
     include("test_memory.jl")
+    include("test_scope.jl")
 end

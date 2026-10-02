@@ -1,5 +1,183 @@
 # MiraDAC.jl benchmark report (plan T3.5)
 
+## A.5b result (branch `julia-alloc-scope`): all 21 `dascope` cases meet the strict rule (2 runs of 2)
+
+Run: `taskset -c 3 julia --project=julia/MiraDAC/bench julia/MiraDAC/bench/bench_ops.jl --scoped`
+(15 rounds, Julia 1.13.1, one thread; pools of A.9; `scoped_*` cases run one `dascope` per batch
+of 16 operations). Each run started when core 3 was at most 25% busy over a 3 s sample of
+`/proc/stat`, 2026-10-02. Library and `bench_cpp`: worktree `build/` (Release) at commit 43f61f5
+plus the working tree. Core 3 (not 5, where another benchmark ran), so absolute numbers differ a
+little from the sections below.
+
+There are 21 scoped cases: `scoped_add`, `scoped_mul`, `scoped_mul_const`, `scoped_exp`,
+`scoped_cmul`, `scoped_cexp` and `scoped_composition` at each of the three sizes. The strict rule
+for them (plan A.5b) is overhead <= 150 ns when C++ < 1 µs and ratio <= 1.10 when C++ >= 1 µs.
+**All 21 pass in both runs (`gate A.5b (scoped_* cases): PASS`).** The closest are
+`n3o4/scoped_exp` (+106 and +109 ns), `n3o4/scoped_cmul` (+97 and +93 ns) and `n3o4/scoped_cexp`
+(1.075 and 1.090). The script prints the two gates on separate lines. Run 3 exits 0
+(`gate: PASS`). Run 4 exits 1 because one **unscoped** case fails A.9:
+`n6o6/mul_const` at +424 ns against a limit of 400 (see below). The same cases in and out of a
+scope:
+
+| case | unscoped overhead or ratio (run 3 / run 4) | scoped (run 3 / run 4) |
+|---|---|---|
+| n3o4/add | +49 / +166 ns | +64 / +59 ns |
+| n3o4/mul_const | +170 / +169 ns | +67 / +69 ns |
+| n3o4/cmul | +235 / +238 ns | +97 / +93 ns |
+| n6o6/add | +294 / +337 ns | +77 / +91 ns |
+| n6o6/mul_const | +377 / **+424** ns | +58 / +81 ns |
+| n6o10/add | 1.257 / 1.291 | 0.954 / 0.980 |
+| n6o10/mul_const | 1.460 / 1.423 | 0.945 / 0.965 |
+
+**Unscoped `n6o6` cases and A.9.** These cases sit at the A.9 limit with or without this change.
+An independent verifier saw `n6o6/add` fail twice (+410 and +439 ns, load average 6.0 and 3.8),
+and run 4 here saw `n6o6/mul_const` fail at a load average of 1.8. An A/B against HEAD, by the
+verifier (unscoped, n6o6, pool 10 000, core 3, three alternating pairs, best of 60 × 40k), shows
+no slowdown: `a + b` took 923.8 / 898.4 / 888.5 ns at HEAD and 906.7 / 891.0 / 901.7 ns in the
+worktree; `a * 2.0` took 789.2 / 786.6 / 789.4 ns at HEAD and 818.4 / 793.8 / 795.3 ns in the
+worktree. The overhead does not come from the Julia layer. It comes from the cold slot. Raw C
+calls with no Julia objects show it (`mdac_nda_add`, `mdac_nda_mul_d` through `ccall`, n6o6,
+pool 10 000, core 3, load 2.5, 6 repetitions):
+
+| | each result freed at once (warm slot, as C++ and `dascope`) | 9 000 results kept, then freed (cold slots, as unscoped Julia between GCs) | unscoped Julia `a + b` / `a * 2.0` |
+|---|---|---|---|
+| add | 396–446 ns | 706–750 ns | 795–849 ns |
+| mul_const | 160–174 ns | 410–435 ns | 732–755 ns |
+
+So about 250–300 ns of the unscoped overhead is the cold 7.4 KB slot that every result gets
+when results are freed only after a GC. That cost depends on memory traffic from other processes,
+not only on core 3. The finalizer and deferred free add about 100 ns. Plan A.5b item 7 keeps the
+unscoped behaviour unchanged, so this cost stays outside a scope. A scope removes both parts:
+`n6o6/scoped_add` is +77 / +91 ns.
+
+### Run 3 (started 01:36:12, core 3 busy 17%, load average 4.29)
+
+```
+case                          C++ ns        Julia ns   overhead ns   ratio  gate
+n3o4/add                        34.0            82.8          48.8   2.435  overhead <= 400 or ratio <= 1.5: pass
+n3o4/mul                       165.5           339.0         173.5   2.048  overhead <= 400 or ratio <= 1.5: pass
+n3o4/iadd                       12.6            18.1           5.5   1.435  overhead <= 60: pass
+n3o4/mul_const                  21.5           191.1         169.6   8.888  overhead <= 400 or ratio <= 1.5: pass
+n3o4/add!                       34.0            24.9          -9.1   0.733  overhead <= 60: pass
+n3o4/mul!                      165.5           153.1         -12.4   0.925  overhead <= 60: pass
+n3o4/exp!                      696.9           710.0          13.1   1.019  overhead <= 60: pass
+n3o4/exp                       696.9           867.9         171.0   1.245  overhead <= 400 or ratio <= 1.5: pass
+n3o4/cmul                      739.1           974.1         235.0   1.318  overhead <= 400 or ratio <= 1.5: pass
+n3o4/cexp                     2753.9          2980.2         226.3   1.082  overhead <= 400 or ratio <= 1.5: pass
+n3o4/composition             10042.4         10324.0         281.6   1.028  overhead <= 400 or ratio <= 1.5: pass
+n6o6/add                       411.2           704.9         293.7   1.714  overhead <= 400 or ratio <= 1.5: pass
+n6o6/mul                     11455.1         11919.7         464.6   1.041  overhead <= 400 or ratio <= 1.5: pass
+n6o6/iadd                      193.1           201.8           8.7   1.045  overhead <= 60: pass
+n6o6/mul_const                 304.1           681.5         377.4   2.241  overhead <= 400 or ratio <= 1.5: pass
+n6o6/add!                      411.2           267.7        -143.5   0.651  overhead <= 60: pass
+n6o6/mul!                    11455.1         11301.8        -153.3   0.987  ratio <= 1.10: pass
+n6o6/exp!                    69833.8         69673.0        -160.8   0.998  ratio <= 1.10: pass
+n6o6/exp                     69833.8         70696.8         863.0   1.012  overhead <= 400 or ratio <= 1.5: pass
+n6o6/cmul                    47600.6         47830.9         230.3   1.005  overhead <= 400 or ratio <= 1.5: pass
+n6o6/cexp                   175447.2        177547.4        2100.2   1.012  overhead <= 400 or ratio <= 1.5: pass
+n6o6/composition          24280524.0      24429802.0      149278.0   1.006  overhead <= 400 or ratio <= 1.5: pass
+n6o10/add                     5839.6          7343.0        1503.4   1.257  overhead <= 400 or ratio <= 1.5: pass
+n6o10/mul                   438742.4        444690.9        5948.5   1.014  overhead <= 400 or ratio <= 1.5: pass
+n6o10/iadd                    2279.9          2269.8         -10.1   0.996  ratio <= 1.10: pass
+n6o10/mul_const               3545.5          5176.8        1631.3   1.460  overhead <= 400 or ratio <= 1.5: pass
+n6o10/add!                    5839.6          3673.6       -2166.0   0.629  ratio <= 1.10: pass
+n6o10/mul!                  438742.4        440044.2        1301.8   1.003  ratio <= 1.10: pass
+n6o10/exp!                 4437890.8       4430725.0       -7165.8   0.998  ratio <= 1.10: pass
+n6o10/exp                  4437890.8       4469936.5       32045.7   1.007  overhead <= 400 or ratio <= 1.5: pass
+n6o10/cmul                 1773474.8       1798933.4       25458.6   1.014  overhead <= 400 or ratio <= 1.5: pass
+n6o10/cexp                 9711598.0       9663136.0      -48462.0   0.995  overhead <= 400 or ratio <= 1.5: pass
+n6o10/composition      10810513801.0   11003655350.0   193141549.0   1.018  overhead <= 400 or ratio <= 1.5: pass
+n3o4/scoped_add                 34.0            98.4          64.4   2.894  overhead <= 150: pass
+n3o4/scoped_mul                165.5           230.0          64.5   1.390  overhead <= 150: pass
+n3o4/scoped_mul_const            21.5            88.8          67.3   4.132  overhead <= 150: pass
+n3o4/scoped_exp                696.9           802.6         105.7   1.152  overhead <= 150: pass
+n3o4/scoped_cmul               739.1           836.3          97.2   1.132  overhead <= 150: pass
+n3o4/scoped_cexp              2753.9          2961.8         207.9   1.075  ratio <= 1.10: pass
+n3o4/scoped_composition         10042.4         10422.1         379.7   1.038  ratio <= 1.10: pass
+n6o6/scoped_add                411.2           487.8          76.6   1.186  overhead <= 150: pass
+n6o6/scoped_mul              11455.1         11731.7         276.6   1.024  ratio <= 1.10: pass
+n6o6/scoped_mul_const           304.1           362.3          58.2   1.192  overhead <= 150: pass
+n6o6/scoped_exp              69833.8         70358.8         525.0   1.008  ratio <= 1.10: pass
+n6o6/scoped_cmul             47600.6         47625.2          24.6   1.001  ratio <= 1.10: pass
+n6o6/scoped_cexp            175447.2        176709.5        1262.3   1.007  ratio <= 1.10: pass
+n6o6/scoped_composition      24280524.0      24363830.0       83306.0   1.003  ratio <= 1.10: pass
+n6o10/scoped_add              5839.6          5572.3        -267.3   0.954  ratio <= 1.10: pass
+n6o10/scoped_mul            438742.4        443610.5        4868.1   1.011  ratio <= 1.10: pass
+n6o10/scoped_mul_const          3545.5          3351.3        -194.2   0.945  ratio <= 1.10: pass
+n6o10/scoped_exp           4437890.8       4447704.2        9813.5   1.002  ratio <= 1.10: pass
+n6o10/scoped_cmul          1773474.8       1789462.4       15987.6   1.009  ratio <= 1.10: pass
+n6o10/scoped_cexp          9711598.0       9649526.0      -62072.0   0.994  ratio <= 1.10: pass
+n6o10/scoped_composition   10810513801.0   11093600145.0   283086344.0   1.026  ratio <= 1.10: pass
+gate A.5b (scoped_* cases): PASS
+gate A.9 (unscoped cases): PASS
+gate: PASS
+exit=0
+```
+
+### Run 4 (started 01:52:31, core 3 busy 20%, load average 1.79)
+
+```
+case                          C++ ns        Julia ns   overhead ns   ratio  gate
+n3o4/add                        34.0           199.7         165.7   5.872  overhead <= 400 or ratio <= 1.5: pass
+n3o4/mul                       162.2           294.9         132.7   1.818  overhead <= 400 or ratio <= 1.5: pass
+n3o4/iadd                       12.5            18.0           5.5   1.437  overhead <= 60: pass
+n3o4/mul_const                  21.2           190.6         169.4   8.993  overhead <= 400 or ratio <= 1.5: pass
+n3o4/add!                       34.0            24.4          -9.6   0.719  overhead <= 60: pass
+n3o4/mul!                      162.2           152.4          -9.8   0.940  overhead <= 60: pass
+n3o4/exp!                      699.6           716.8          17.2   1.025  overhead <= 60: pass
+n3o4/exp                       699.6           876.1         176.5   1.252  overhead <= 400 or ratio <= 1.5: pass
+n3o4/cmul                      732.6           970.1         237.5   1.324  overhead <= 400 or ratio <= 1.5: pass
+n3o4/cexp                     2725.3          2927.8         202.5   1.074  overhead <= 400 or ratio <= 1.5: pass
+n3o4/composition              9955.6         10239.4         283.8   1.029  overhead <= 400 or ratio <= 1.5: pass
+n6o6/add                       406.2           743.6         337.4   1.831  overhead <= 400 or ratio <= 1.5: pass
+n6o6/mul                     11505.3         11968.5         463.2   1.040  overhead <= 400 or ratio <= 1.5: pass
+n6o6/iadd                      193.1           202.0           8.9   1.046  overhead <= 60: pass
+n6o6/mul_const                 303.9           727.6         423.7   2.394  overhead <= 400 or ratio <= 1.5: FAIL
+n6o6/add!                      406.2           267.8        -138.4   0.659  overhead <= 60: pass
+n6o6/mul!                    11505.3         11363.2        -142.1   0.988  ratio <= 1.10: pass
+n6o6/exp!                    69845.2         69903.8          58.6   1.001  ratio <= 1.10: pass
+n6o6/exp                     69845.2         70806.1         960.9   1.014  overhead <= 400 or ratio <= 1.5: pass
+n6o6/cmul                    47838.7         48153.9         315.2   1.007  overhead <= 400 or ratio <= 1.5: pass
+n6o6/cexp                   175756.4        180526.7        4770.3   1.027  overhead <= 400 or ratio <= 1.5: pass
+n6o6/composition          24262892.0      24331791.0       68899.0   1.003  overhead <= 400 or ratio <= 1.5: pass
+n6o10/add                     5888.0          7599.5        1711.5   1.291  overhead <= 400 or ratio <= 1.5: pass
+n6o10/mul                   440485.9        444231.1        3745.2   1.009  overhead <= 400 or ratio <= 1.5: pass
+n6o10/iadd                    2280.1          2326.2          46.1   1.020  ratio <= 1.10: pass
+n6o10/mul_const               3719.6          5294.6        1575.0   1.423  overhead <= 400 or ratio <= 1.5: pass
+n6o10/add!                    5888.0          3740.4       -2147.6   0.635  ratio <= 1.10: pass
+n6o10/mul!                  440485.9        436230.4       -4255.5   0.990  ratio <= 1.10: pass
+n6o10/exp!                 4424821.7       4381513.8      -43308.0   0.990  ratio <= 1.10: pass
+n6o10/exp                  4424821.7       4420244.0       -4577.7   0.999  overhead <= 400 or ratio <= 1.5: pass
+n6o10/cmul                 1780441.8       1787869.4        7427.6   1.004  overhead <= 400 or ratio <= 1.5: pass
+n6o10/cexp                 9633570.0       9612635.0      -20935.0   0.998  overhead <= 400 or ratio <= 1.5: pass
+n6o10/composition      10977853102.0   10942671186.0   -35181916.0   0.997  overhead <= 400 or ratio <= 1.5: pass
+n3o4/scoped_add                 34.0            93.3          59.3   2.745  overhead <= 150: pass
+n3o4/scoped_mul                162.2           232.4          70.2   1.433  overhead <= 150: pass
+n3o4/scoped_mul_const            21.2            90.4          69.2   4.263  overhead <= 150: pass
+n3o4/scoped_exp                699.6           808.6         109.0   1.156  overhead <= 150: pass
+n3o4/scoped_cmul               732.6           825.8          93.2   1.127  overhead <= 150: pass
+n3o4/scoped_cexp              2725.3          2971.2         245.9   1.090  ratio <= 1.10: pass
+n3o4/scoped_composition          9955.6         10383.5         427.9   1.043  ratio <= 1.10: pass
+n6o6/scoped_add                406.2           497.1          90.9   1.224  overhead <= 150: pass
+n6o6/scoped_mul              11505.3         11691.4         186.1   1.016  ratio <= 1.10: pass
+n6o6/scoped_mul_const           303.9           385.1          81.2   1.267  overhead <= 150: pass
+n6o6/scoped_exp              69845.2         70496.4         651.2   1.009  ratio <= 1.10: pass
+n6o6/scoped_cmul             47838.7         47525.2        -313.5   0.993  ratio <= 1.10: pass
+n6o6/scoped_cexp            175756.4        177874.4        2118.0   1.012  ratio <= 1.10: pass
+n6o6/scoped_composition      24262892.0      24269701.0        6809.0   1.000  ratio <= 1.10: pass
+n6o10/scoped_add              5888.0          5772.4        -115.6   0.980  ratio <= 1.10: pass
+n6o10/scoped_mul            440485.9        442230.3        1744.4   1.004  ratio <= 1.10: pass
+n6o10/scoped_mul_const          3719.6          3591.1        -128.5   0.965  ratio <= 1.10: pass
+n6o10/scoped_exp           4424821.7       4429662.5        4840.8   1.001  ratio <= 1.10: pass
+n6o10/scoped_cmul          1780441.8       1784595.2        4153.4   1.002  ratio <= 1.10: pass
+n6o10/scoped_cexp          9633570.0       9728517.0       94947.0   1.010  ratio <= 1.10: pass
+n6o10/scoped_composition   10977853102.0   10922372024.0   -55481078.0   0.995  ratio <= 1.10: pass
+gate A.5b (scoped_* cases): PASS
+gate A.9 (unscoped cases): FAIL
+gate: FAIL
+exit=1
+```
+
 ## Stage 3 result: the gate of plan A.9 PASSES (2 runs of 2, all 27 cases)
 
 Run: `taskset -c 5 julia --project=julia/MiraDAC/bench julia/MiraDAC/bench/bench_ops.jl`

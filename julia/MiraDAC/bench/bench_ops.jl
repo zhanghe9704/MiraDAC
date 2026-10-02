@@ -8,8 +8,12 @@
 # runs one round before each Julia round. Prints the table and the gate of plan A.9, and exits
 # 1 if the gate fails.
 #
-# Run: taskset -c 5 julia --project=julia/MiraDAC/bench julia/MiraDAC/bench/bench_ops.jl \
-#          [--rounds N] [--cpp PATH]
+# With --scoped, the allocating cases also run inside `dascope`, one scope per batch of
+# --batch N operations (default 16), as a user would wrap a step of a computation; their
+# names start with `scoped_` and they get the strict rule (plan A.5b).
+#
+# Run: taskset -c 3 julia --project=julia/MiraDAC/bench julia/MiraDAC/bench/bench_ops.jl \
+#          [--rounds N] [--cpp PATH] [--scoped] [--batch N]
 
 using MiraDAC
 using Printf
@@ -102,6 +106,27 @@ function t_exp!(a, b, c, reps)
     return cpu_ns() - t0
 end
 
+# The allocating cases inside dascope, one scope per batch of BATCH[] operations.
+const BATCH = Ref(16)
+
+function t_scoped(op::F, a, b, reps) where {F}
+    t0 = cpu_ns()
+    i = 0
+    while i < reps
+        n = min(BATCH[], reps - i)
+        dascope() do
+            for _ in 1:n
+                op(a, b)
+            end
+        end
+        i += n
+    end
+    return cpu_ns() - t0
+end
+
+const SCOPED = Ref(false)
+const SCOPED_OPS = (("add", +), ("mul", *), ("mul_const", (a, b) -> a * 2.0), ("exp", (a, b) -> exp(a)))
+
 const reps_of = Dict{String,Int}()
 const best_ns = Dict{String,Float64}()
 const names = String[]                 # in first-run order
@@ -134,42 +159,60 @@ function bench(name, fn, args...)
     end
 end
 
-function numeric(nvars, order, poolsize)
+# One size: the unscoped cases, or (scoped = true) the scoped_* cases. A round runs every size
+# unscoped first, then every size scoped, so the unscoped cases follow the same work as in a
+# run without --scoped (interleaved, scoped cases made the next unscoped n6o6 cases ~40 ns slower).
+function numeric(nvars, order, poolsize, scoped)
     init!(order, nvars, poolsize; table=true)
     rng = MersenneTwister(12345)       # same data every round
     rand_nda() = NDA(2 .* rand(rng, current_env().full_length) .- 1)
     p = "n$(nvars)o$(order)/"
     a, b, c = rand_nda(), rand_nda(), NDA(0.0)
-    bench(p * "add", t_add, a, b, c)
-    bench(p * "mul", t_mul, a, b, c)
-    bench(p * "iadd", t_iadd, a, b, c)
-    bench(p * "mul_const", t_mul_const, a, b, c)
-    bench(p * "add!", t_add!, a, b, c)
-    bench(p * "mul!", t_mul!, a, b, c)
-    bench(p * "exp!", t_exp!, a, b, c)
-    bench(p * "exp", t_exp, a, b, c)
+    if !scoped                         # the cases and data in the order of a plain run
+        bench(p * "add", t_add, a, b, c)
+        bench(p * "mul", t_mul, a, b, c)
+        bench(p * "iadd", t_iadd, a, b, c)
+        bench(p * "mul_const", t_mul_const, a, b, c)
+        bench(p * "add!", t_add!, a, b, c)
+        bench(p * "mul!", t_mul!, a, b, c)
+        bench(p * "exp!", t_exp!, a, b, c)
+        bench(p * "exp", t_exp, a, b, c)
+    else
+        for (name, op) in SCOPED_OPS
+            bench(p * "scoped_" * name, t_scoped, op, a, b)
+        end
+    end
     ca, cb, cc = CNDA(a, b), CNDA(b, a), CNDA(0.0)
-    bench(p * "cmul", t_mul, ca, cb, cc)
-    bench(p * "cexp", t_exp, ca, cb, cc)
+    if !scoped
+        bench(p * "cmul", t_mul, ca, cb, cc)
+        bench(p * "cexp", t_exp, ca, cb, cc)
+    else
+        bench(p * "scoped_cmul", t_scoped, *, ca, cb)
+        bench(p * "scoped_cexp", t_scoped, (a, b) -> exp(a), ca, cb)
+    end
     m, n = NDAList(), NDAList()
     for _ in 1:nvars
         push!(m, rand_nda())
         push!(n, rand_nda())
     end
-    bench(p * "composition", t_composition, m, n, nothing)
+    scoped ? bench(p * "scoped_composition", t_scoped, compose, m, n) :
+             bench(p * "composition", t_composition, m, n, nothing)
     clear!()
 end
 
 # The C++ case a Julia case is compared with.
-cpp_case(name) = replace(name, "!" => "")
+cpp_case(name) = replace(name, "!" => "", "scoped_" => "")
 
 const IN_PLACE = ("iadd", "add!", "mul!", "exp!")
 
-# Plan A.9 (revised): one rule per case, chosen by its C++ time; below 1 us the overhead limit
-# is 60 ns in place and 400 ns for allocating operations.
 # Plan A.9: in-place cases get one rule by C++ time; allocating cases pass if
 # their overhead is <= 400 ns or their ratio is <= 1.5 (user decision 2026-10-01).
 function gate(name, cpp, jl)
+    # Plan A.5b: allocating operations inside dascope get the strict rule.
+    if startswith(split(name, "/")[2], "scoped_")
+        cpp >= 1000 && return "ratio <= 1.10", jl / cpp <= 1.10
+        return "overhead <= 150", jl - cpp <= 150
+    end
     if split(name, "/")[2] in IN_PLACE
         cpp >= 1000 && return "ratio <= 1.10", jl / cpp <= 1.10
         return "overhead <= 60", jl - cpp <= 60
@@ -186,7 +229,9 @@ function main(args)
     i = 1
     while i <= length(args)
         args[i] == "--rounds" ? (rounds = parse(Int, args[i+1])) :
-        args[i] == "--cpp" ? (cpp = args[i+1]) : error("unknown argument $(args[i])")
+        args[i] == "--cpp" ? (cpp = args[i+1]) :
+        args[i] == "--batch" ? (BATCH[] = parse(Int, args[i+1])) :
+        args[i] == "--scoped" ? (SCOPED[] = true; i -= 1) : error("unknown argument $(args[i])")
         i += 2
     end
     Sys.islinux() && ccall(:prctl, Cint, (Cint, Culong, Culong, Culong, Culong), 41, 1, 0, 0, 0)
@@ -196,8 +241,9 @@ function main(args)
         write(child, "\n")
         flush(child)
         readline(child) == "done" || error("$cpp stopped in round $r")
-        for (nvars, order, poolsize) in SIZES
-            numeric(nvars, order, poolsize)
+        for scoped in (false, true), (nvars, order, poolsize) in SIZES
+            scoped && !SCOPED[] && continue
+            numeric(nvars, order, poolsize, scoped)
         end
         println(stderr, "round $r/$rounds done")
     end
@@ -207,23 +253,28 @@ function main(args)
     success(child) || error("$cpp exited with $(child.exitcode)")
     cpp_ns = parse_json_numbers(out)
 
-    ok = true
+    ok = Dict("A.9" => true, "A.5b" => true)   # unscoped cases, scoped_* cases
     @printf("%-20s%16s%16s%14s%8s  %s\n", "case", "C++ ns", "Julia ns", "overhead ns", "ratio", "gate")
     for name in names
+        g = startswith(split(name, "/")[2], "scoped_") ? "A.5b" : "A.9"
         if haskey(errors, name)
-            ok = false
+            ok[g] = false
             @printf("%-20s%16.1f%16s%14s%8s  FAIL: %s\n", name, cpp_ns[cpp_case(name)], "error", "", "",
                     errors[name])
             continue
         end
         c, jl = cpp_ns[cpp_case(name)], best_ns[name]
         rule, pass = gate(name, c, jl)
-        ok &= pass
+        ok[g] &= pass
         @printf("%-20s%16.1f%16.1f%14.1f%8.3f  %s: %s\n", name, c, jl, jl - c, jl / c, rule,
                 pass ? "pass" : "FAIL")
     end
-    println("gate: ", ok ? "PASS" : "FAIL")
-    return ok ? 0 : 1
+    # Reported apart: the unscoped n6o6 cases have little A.9 margin and fail under load.
+    SCOPED[] && println("gate A.5b (scoped_* cases): ", ok["A.5b"] ? "PASS" : "FAIL")
+    println("gate A.9 (unscoped cases): ", ok["A.9"] ? "PASS" : "FAIL")
+    pass = all(values(ok))
+    println("gate: ", pass ? "PASS" : "FAIL")
+    return pass ? 0 : 1
 end
 
 exit(main(ARGS))

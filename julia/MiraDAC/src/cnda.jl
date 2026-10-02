@@ -14,14 +14,13 @@ functions are those C++ has for complex vectors: `sqrt exp log asin acos atan as
 mutable struct CNDA
     ptr::Handle
     function CNDA(p::Handle)
-        v = new(p)
-        return finalizer(cnda_finalizer, v)
+        return adopt!(new(p))     # a finalizer, or the current dascope
     end
 end
 
 cnda_finalizer(v::CNDA) = defer_free(CNDA_QUEUE, v)
 
-Base.unsafe_convert(::Type{Handle}, v::CNDA) = v.ptr
+Base.unsafe_convert(::Type{Handle}, v::CNDA) = handle(v)
 op_env(v::CNDA) = mdac_cnda_env(v)
 
 # A new CNDA from the allocating C call f(out) in the env of x; d as in alloc_call.
@@ -134,14 +133,13 @@ A list of `CNDA` held in C++; it behaves as `NDAList`.
 mutable struct CNDAList <: AbstractVector{CNDA}
     ptr::Handle
     function CNDAList(p::Handle)
-        l = new(p)
-        return finalizer(clist_finalizer, l)
+        return adopt!(new(p))     # a finalizer, or the current dascope
     end
 end
 
 clist_finalizer(l::CNDAList) = defer_free(CLIST_QUEUE, l)
 
-Base.unsafe_convert(::Type{Handle}, l::CNDAList) = l.ptr
+Base.unsafe_convert(::Type{Handle}, l::CNDAList) = handle(l)
 op_env(l::CNDAList) = mdac_cndalist_env(l)
 
 function new_clist(f, x)
@@ -159,7 +157,7 @@ end
 
 function CNDAList(v::AbstractVector{CNDA})
     isempty(v) && return CNDAList()
-    ptrs = Handle[x.ptr for x in v]
+    ptrs = Handle[handle(x) for x in v]
     GC.@preserve v new_clist(o -> mdac_cndalist_from(ptrs, length(ptrs), o), first(v))
 end
 

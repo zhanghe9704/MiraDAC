@@ -17,12 +17,13 @@ package and this environment (`julia/MiraDAC/bench`) at `build/capi/libmiradac_c
 ## Run
 
 ```sh
-taskset -c 5 julia --project=julia/MiraDAC/bench julia/MiraDAC/bench/bench_ops.jl [--rounds N] [--cpp PATH]
+taskset -c 3 julia --project=julia/MiraDAC/bench julia/MiraDAC/bench/bench_ops.jl [--rounds N] [--cpp PATH] [--scoped] [--batch N]
 ```
 
 Julia cases, per size: `add`, `mul`, `iadd` (`add!(c, c, b)`), `mul_const`, `exp`,
 `composition` (`compose(m, n)`), and the in-place API `add!`, `mul!`, `exp!` (compared with the
-C++ `add`, `mul`, `exp`). `cmul` (`c = a * b`) and `cexp`
+C++ `add`, `mul`, `exp`). With `--scoped`, the allocating cases also run inside
+`dascope`, one scope per batch of `--batch N` operations (default 16), as `scoped_*` (plan A.5b). `cmul` (`c = a * b`) and `cexp`
 (`c = exp(a)`) on `CNDA(a, b)`, `CNDA(b, a)`; the symbolic cases come with Stage 5.
 
 ## Protocol (as in `python/bench/bench_ops.py`)
@@ -41,7 +42,7 @@ C++ `add`, `mul`, `exp`). `cmul` (`c = a * b`) and `cexp`
   closes stdin; the child prints `{"case": ns_per_op, ...}` as JSON on stdout and exits.
 - Transparent huge pages are disabled for the driver process (`prctl(PR_SET_THP_DISABLE)`), as
   the C++ side does for itself.
-- Run pinned to one core: `taskset -c 5 julia --project=julia/MiraDAC/bench <script>`.
+- Run pinned to one core: `taskset -c 3 julia --project=julia/MiraDAC/bench <script>`.
 
 ## Gate (plan A.9, revised 2026-09-30)
 
@@ -50,3 +51,9 @@ Each case gets one rule, chosen by its C++ time:
 - C++ time < 1 µs: overhead <= 60 ns in place (`iadd`, `add!`, `mul!`, `exp!`), <= 400 ns for
   an operation returning a new object.
 - C++ time >= 1 µs: ratio Julia / C++ <= 1.10.
+
+Allocating cases outside a scope: overhead <= 400 ns or ratio <= 1.5 (revised 2026-10-01).
+Scoped cases (`scoped_*`, plan A.5b): overhead <= 150 ns below 1 µs, ratio <= 1.10 from 1 µs.
+With `--scoped` the script prints `gate A.5b` (the `scoped_*` cases) and `gate A.9` (the
+others) apart, then `gate:` for both; it exits 1 if either fails. The unscoped `n6o6`
+allocating cases have little A.9 margin and can fail when the machine is loaded.
