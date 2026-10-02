@@ -7,7 +7,7 @@
 Run: `taskset -c 3 julia --project=julia/MiraDAC/bench julia/MiraDAC/bench/bench_ops.jl --scoped`
 (15 rounds, Julia 1.13.1, one thread; pools of A.9; `scoped_*` cases run one `dascope` per batch
 of 16 operations). Each run started when core 3 was at most 25% busy over a 3 s sample of
-`/proc/stat`, 2026-10-02. Library and `bench_cpp`: worktree `build/` (Release) at commit 43f61f5
+`/proc/stat`, 2026-10-02. Library and `bench_cpp`: worktree `build/` (Release) at commit 68b0de1
 plus the working tree. Core 3 (not 5, where another benchmark ran), so absolute numbers differ a
 little from the sections below.
 
@@ -262,7 +262,7 @@ gate: PASS
 
 ## Stage 7 rerun (multi-env API): blocking gate PASSED (allocating cases informational, A.9 as of 2026-10-01 later)
 
-Same command and protocol as the Stage 4 result below, 2026-10-01, `build/` at commit 43f61f5 plus
+Same command and protocol as the Stage 4 result below, 2026-10-01, `build/` at commit 68b0de1 plus
 the working tree (C API rebuilt with the T7.1 functions). One run, started 18:08:54 with core 5 4%
 busy and a 1-minute load average of 1.45; another benchmark (a different checkout) ran pinned to
 core 3 during the run. Exit status 0: blocking PASS (in-place cases below 1 µs at most +23.2 ns,
