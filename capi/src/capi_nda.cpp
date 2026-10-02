@@ -13,12 +13,6 @@ using namespace mdac;
 
 namespace {
 
-std::vector<int> exponents(const int* exps, size_t k) {
-    for (size_t i = 0; i < k; ++i)
-        if (exps[i] < 0) throw std::invalid_argument("exponents must be non-negative");
-    return std::vector<int>(exps, exps + k);
-}
-
 // out = t, keeping out's slot (a move assignment would swap slots).
 void assign(NDA& out, const NDA& t) { out = t; }
 
@@ -145,6 +139,13 @@ mdac_status mdac_nda_copy(const mdac_nda* v, mdac_nda** out) {
 void mdac_nda_free(mdac_nda* v) { delete &ref(v); }
 
 mdac_env* mdac_nda_env(const mdac_nda* v) { return handle(ref(v).env_); }
+
+mdac_status mdac_nda_import(mdac_env* e, const mdac_nda* v, mdac_nda** out) {
+    MDAC_TRY {
+        EnvGuard g(ref(v).env_);
+        *out = handle(new NDA(da::import_to(live(e), ref(v))));
+    } MDAC_CATCH
+}
 
 #define MDAC_NDA_GET(name, T, expr)                                         \
     mdac_status mdac_nda_##name(const mdac_nda* v_, T* out) {               \

@@ -42,3 +42,4 @@ dist/
 # Julia
 julia/**/LocalPreferences.toml
 julia/**/Manifest.toml
+julia/MiraDAC/docs/build/

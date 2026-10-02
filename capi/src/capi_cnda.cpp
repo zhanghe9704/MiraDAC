@@ -118,6 +118,14 @@ void mdac_cnda_free(mdac_cnda* v) { delete &ref(v); }
 
 mdac_env* mdac_cnda_env(const mdac_cnda* v) { return handle(env_of(ref(v))); }
 
+mdac_status mdac_cnda_import(mdac_env* e, const mdac_cnda* v, mdac_cnda** out) {
+    MDAC_TRY {
+        EnvGuard g(env_of(ref(v)));
+        da::DAEnv& d = live(e);
+        *out = handle(new CNDA(da::import_to(d, get_real(ref(v))), da::import_to(d, get_imag(ref(v)))));
+    } MDAC_CATCH
+}
+
 mdac_status mdac_cnda_real(const mdac_cnda* v, mdac_nda** out) {
     return make_nda(out, [&] { return get_real(ref(v)); }, ref(v));
 }

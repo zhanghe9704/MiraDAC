@@ -1,7 +1,7 @@
 name: CI
 
-# Builds and tests both variants of the `da` library and of the Python
-# package `miradac`:
+# Builds and tests both variants of the `da` library, of the Python
+# package `miradac` and of the Julia package MiraDAC.jl (with its C API):
 #   * numerical-only  (WITH_SYMBOLIC=OFF)  — no external dependencies
 #   * numerical+symbolic (WITH_SYMBOLIC=ON) — the pinned SymEngine
 #     (cmake/symengine_pin.txt), built by scripts/setup_symengine.sh
@@ -120,12 +120,13 @@ jobs:
           .venv/bin/pytest python/tests -q
 
   julia:
-    name: Julia ${{ matrix.julia }} (C API + MiraDAC.jl)
+    name: Julia ${{ matrix.julia }}, symbolic ${{ matrix.symbolic }} (C API + MiraDAC.jl)
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         julia: [ "1.10", "1" ]
+        symbolic: [ "ON", "OFF" ]
     steps:
       - uses: actions/checkout@v4
 
@@ -133,19 +134,22 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y cmake g++ ninja-build libgmp-dev
 
       - name: Cache the pinned SymEngine
+        if: matrix.symbolic == 'ON'
         uses: actions/cache@v4
         with:
           path: ~/.local/opt
           key: symengine-${{ runner.os }}-${{ hashFiles('cmake/symengine_pin.txt', 'scripts/setup_symengine.sh') }}
 
       - name: Pinned SymEngine
+        if: matrix.symbolic == 'ON'
         run: |
           scripts/setup_symengine.sh --no-python --print-env \
             | sed 's/^export //' >> "$GITHUB_ENV"
 
       - name: Configure + build (C API)
         run: |
-          cmake -S . -B build -G Ninja -DDA_BUILD_CAPI=ON -DSymEngine_DIR="$SymEngine_DIR"
+          cmake -S . -B build -G Ninja -DDA_BUILD_CAPI=ON \
+            -DWITH_SYMBOLIC=${{ matrix.symbolic }} -DSymEngine_DIR="$SymEngine_DIR"
           cmake --build build -j2
 
       - name: C API tests
@@ -159,3 +163,19 @@ jobs:
         run: |
           julia julia/dev_setup.jl
           julia --project=julia/MiraDAC -e 'using Pkg; Pkg.test()'
+
+      - name: Examples
+        run: |
+          # In a scratch directory: examples.jl writes da_output.txt.
+          cd "$RUNNER_TEMP"
+          for f in "$GITHUB_WORKSPACE"/julia/MiraDAC/examples/*.jl; do
+            case "$(basename "$f")" in
+              *symbolic*|example_interop.jl) [ "${{ matrix.symbolic }}" = ON ] || continue ;;
+            esac
+            echo "== $f"
+            julia --project="$GITHUB_WORKSPACE/julia/MiraDAC" "$f" > out.txt
+            if grep -q FAIL out.txt; then cat out.txt; exit 1; fi
+          done
+
+      - name: Docs (Documenter, no deploy)
+        run: julia --project=julia/MiraDAC/docs julia/MiraDAC/docs/make.jl

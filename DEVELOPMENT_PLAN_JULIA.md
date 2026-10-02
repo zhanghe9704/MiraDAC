@@ -220,6 +220,14 @@ allocating operations is now "overhead ≤ 400 ns or ratio ≤ 1.5" at every siz
 unchanged. An explicit scope that frees temporaries promptly (`dascope`) is being developed
 separately (branch `julia-alloc-scope`) to remove this cost.
 
+*2026-10-01, later:* even with that rule, `a * 2.0` at (6,6) sits at the 400 ns limit (+319 to
++423 ns over 4 runs; C++ itself dropped from ~390 to ~300 ns with the slot stack) — the same
+cold-slot cost below 1 µs. Following the user's direction to keep option 1 and continue while
+`dascope` is developed, **allocating cases are informational until `dascope` lands**: the
+benchmark still measures and records them, but they do not block a stage. In-place cases stay
+blocking under their strict rules. Once `dascope` is merged, scoped allocating cases become
+blocking under the strict rule (overhead ≤ 150 ns below 1 µs, ratio ≤ 1.10 above).
+
 ---
 
 ## Part B — Staged implementation plan
@@ -623,6 +631,27 @@ in-place forms, `CNDAList`. Tests ported from `python/tests/test_cnda.py` and th
   400: 3072 → 3140). The fix belongs in the C++ pool (for example `alloc` returning the lowest
   free slot, so temporaries stay packed), a new **[C++]** task, or the gate needs a user
   decision; both are outside this stage. Tables in `julia/MiraDAC/bench/REPORT.md`.
+- *As built (gate rerun after `efc0f70` and the 2026-10-01 gate): passes in 2 runs of 4; the other
+  two fail on `n6o6/mul_const` only.* `build/` and `bench_cpp` at commit `efc0f70`; the C++, ASan,
+  C API (`[cnda]` 1426 assertions), Python (212) and Julia (504) suites pass. Same protocol (`taskset
+  -c 5`, core 5 at most 25% busy over 3 s). `n3o4/cexp` now passes (ratio 1.056–1.095, overhead
+  157–252 ns) as do all `cmul`/`cexp` cases. `n6o6/mul_const` (`a * 2.0`) sits on the 400 ns
+  overhead limit: +319, +423, +404, +380 ns (ratio ≈ 2.3). The stack free list made C++ faster
+  there (387–399 → 296–307 ns, it reuses the slot it has just freed), while Julia, whose results
+  are freed only after a GC, got slower (605–617 → 627–727 ns): the cold-slot cost A.9's
+  2026-10-01 revision describes, here on a 7.4 KB slot below 1 µs. Removing it needs the
+  `dascope` work (A.9) or a gate decision, both outside this stage. Tables in
+  `julia/MiraDAC/bench/REPORT.md`.
+- *As built (final gate rerun, allocating cases informational per A.9 2026-10-01 later): the
+  blocking gate PASSES; Stage 4 is done.* `bench_ops.jl` prints `gate (blocking): PASS/FAIL` over
+  the in-place cases (strict rules; the only verdict that sets the exit status) and `allocating
+  (informational): pass/fail` naming any allocating case over "overhead <= 400 ns or ratio <= 1.5".
+  No case is non-allocating other than the in-place ones (`iadd`, `add!`, `mul!`, `exp!`), so
+  those form the blocking set. One run (same protocol, core 5 17% busy; `build/` at `efc0f70`, no
+  rebuild needed; C++, ASan, C API, `[cnda]` 1426 assertions, Python 212 and Julia 504 pass):
+  exit 0, blocking PASS (in-place below 1 µs at most +12 ns, above at most ratio 1.018),
+  allocating informational pass (`n6o6/mul_const` +380.6 ns, `n3o4/cexp` 1.083, `cmul`/`cexp`
+  1.007–1.344). Table in `julia/MiraDAC/bench/REPORT.md`.
 
 ### Stage 5 — Symbolic: SymExpr and SDA
 
@@ -635,6 +664,18 @@ return `MDAC_ERR_UNSUPPORTED`. `mdac_has_symbolic()` reports the build; Julia's
 free symbols remain), arithmetic with expr and double on both sides, `pow`, `neg`, `eq`, `hash`,
 `subs(expr, n, const mdac_expr* const* keys, const mdac_expr* const* vals, out)`, `expand`,
 `diff`, `free_symbols` (handles into a caller buffer, size-query), `simplify`.
+- *As built:* `capi/src/capi_sda.cpp` (with T5.2), tests `[sym]` in `capi/test/test_capi.cc`.
+  Every symbolic function body is wrapped in `MDAC_SYM(...)` (`common.h`), which in a numeric-only
+  build becomes `return mdac::unsupported();` (`MDAC_ERR_UNSUPPORTED`, with a `mdac_last_error`
+  message); the free functions then do nothing and the list length/env functions return 0/null
+  (`MDAC_SYM_ELSE`). Names: `mdac_expr_new_d`, `_new_i` (`int64_t`, `<stdint.h>` now included),
+  `_parse`, `_symbol`, `_copy`, `_free`, `_to_string`, `_to_double`, `mdac_expr_<op>` / `_<op>_d` /
+  `_d<op>` for `add sub mul div pow`, `_neg`, `_eq(a, b, int*)`, `_hash(a, uint64_t*)`, `_subs`,
+  `_expand`, `_diff` (`MDAC_ERR_VALUE` if the variable is not a symbol), `_simplify`
+  (`da::simplified_expr`), `_free_symbols`; plus `mdac_expr_is_zero` (`da::is_zero`, for Julia
+  `iszero`). `MDAC_CATCH` maps `SymEngine::SymEngineException` (parse errors, a symbol without a
+  value in `evaluate`, ...) to `MDAC_ERR_VALUE`. The negative-exponent check moved from
+  `capi_nda.cpp` to `common.h` (`mdac::exponents`). The ABI version stays 1 (functions only added).
 
 **T5.2 C API SDA.** `mdac_sda_*` mirroring the NDA functions that compile for `T = Expression`
 (try each; list the skipped ones in a comment, as the Python T5.1 did): lifecycle, `con`,
@@ -643,23 +684,73 @@ free symbols remain), arithmetic with expr and double on both sides, `pow`, `neg
 functions; `promote(nda)`, `svar`; `der integ substitute compose` for SDA;
 `evaluate(sda, n, keys, vals, out_nda)` (the vector overload, `interop.h:175`); per-coefficient
 `simplify`, `expand`, `subs`.
+- *As built:* operand naming as for CNDA (T4.1): `mdac_sda_<op>` (SDA, SDA), `_n`/`n<op>` (NDA),
+  `_e`/`e<op>` (Expr), `_d`/`d<op>` (double), `mdac_nda_<op>_e`/`mdac_nda_e<op>` (NDA with an Expr,
+  giving an SDA), each also `_into` (`MDAC_SDA_BINOP_DECL`). Every `_into` form computes the C++
+  result in a temporary and copy-assigns it into `out` (its slot is kept), so it can also return
+  `MDAC_ERR_POOL`. Lifecycle: `mdac_sda_new(env, expr_or_null)`, `_new_d`, `_var` (`svar`),
+  `_promote`, `_copy`, `_free`, `_env`; inspection `_con`, `_set_con`, `_length`, `_nterms`,
+  `_coeffs`, `_coeff`, `_set_coeff`, `_index_term`, `_iszero`, `_clean`, `_reset`, `_to_string`
+  (the first line names the slot, so the test compares the rest with C++). Not provided, listed in
+  the file comment and the header: `from_coeffs`, `norm`, `abs`, eval at a point, the eps argument
+  of `iszero`/`clean`, `asinh acosh atanh`, `inv_map`, `evaluate_map` (no SDA version in C++, or
+  the kernel ignores symbolic coefficients). Lists `mdac_sdalist_*` as for NDA; algorithms
+  `mdac_sda_der`, `_integ`, `_substitute_d`, `_substitute`, `_substitute_multi`,
+  `mdac_sdalist_substitute`, `_compose`, `_compose_d` (length(m) new Expr handles). Checks C++ only
+  asserts are made as for NDA. A numeric-only scratch build (`-DWITH_SYMBOLIC=OFF`) compiles and
+  passes `capi_core`, with `mdac_has_symbolic() == 0` and the stubs returning `MDAC_ERR_UNSUPPORTED`.
 
 **T5.3 Julia SymExpr.** `SymExpr` type: constructors from `Real` and `String`,
 `dasymbols("a b")` → tuple, `Base.string`, `show`, `Float64(x)`, `==`, `hash`, arithmetic, `^`,
 `subs(x, dict)`, `expand`, `diff(x, s)`, `free_symbols`, `simplify`. Tests ported from
 `python/tests/test_expr.py`.
+- *As built:* `julia/MiraDAC/src/symbolic.jl` (with T5.4), tests `test/test_expr.jl` (the sympy
+  tests are not ported). `MiraDAC.HAS_SYMBOLIC` is a `Bool` global set in `__init__` from
+  `mdac_has_symbolic()`; `runtests.jl` includes the symbolic files only when it is true (checked
+  against a numeric-only scratch build: 504 tests pass, symbolic files skipped). SymEngine.jl 0.13
+  exports `subs`, `expand`, `free_symbols` (and `coeff`, which MiraDAC exports since Stage 2), so,
+  per A.6, MiraDAC does not export `subs`, `expand`, `free_symbols` (use `MiraDAC.subs`, ...);
+  `simplify` and `dasymbols` are exported, `diff` extends `Base.diff`, `iszero` `Base.iszero`.
+  `SymExpr(::Integer)` is an exact integer (beyond `Int64` through its decimal text), another
+  `Real` a double; `Float64(x)` with free symbols throws `ArgumentError`; `show` prints
+  `SymExpr("a + b")`, `print`/`string` the text. Arithmetic with an `Integer` operand is exact (as
+  in Python). `SymExpr`s are freed through their own deferred-free queue (`EXPR_QUEUE`, no env:
+  every drain frees them), since SymEngine's reference counts are not thread-safe
+  (`WITH_SYMENGINE_THREAD_SAFE=OFF`); symbolic objects are therefore for one thread at a time.
+  Julia 1.13 turns a literal `x^-1` into `inv(x)`, so `Base.literal_pow` is defined for `NDA`,
+  `CNDA`, `SymExpr` and `SDA` to call `^`.
 
 **T5.4 Julia SDA.** `SDA` type, `sdavar(i)`, `promote_sda(v)`, operators (with SDA, NDA,
 SymExpr, Real), functions, in-place forms, `SDAList`, algorithms,
 `evaluate(s, dict::AbstractDict{SymExpr,<:Real})::NDA`. Tests ported from
 `python/tests/test_sda.py` and `python/tests/test_symbolic.py` (stored-reference tolerance 1e-12,
 as the Python suite uses since commit `7ebbf09`).
+- *As built:* tests `test/test_sda.jl`, `test/test_symbolic.jl`. `SDA()` (zero), `SDA(x::SymExpr)`,
+  `SDA(::Integer)` (exact), `SDA(::Real)`; an `Integer` operand of an SDA operator or in-place form
+  is an exact `SymExpr`. As for CNDA, the Julia API has no setters (`set_coeff`, `con =`), so the
+  Python tests of them are not ported. `coeffs`/`coeff`/`con` return `SymExpr`s; `iszero(::SDA)`;
+  `show` as for NDA. In-place forms `add! sub! mul! div!` for every operand pair and `exp!` ... for
+  the SDA functions go through the `alloc_call` retry (they take temporary slots). `SDA` and
+  `SDAList` have their own free queues (`SDA_QUEUE`, `SLIST_QUEUE`); a 500-iteration loop with a
+  pool of 32 exercises the retry. Algorithms as for NDA: `der`, `integ`, `substitute` (number, SDA,
+  several), `compose(m, v)` (an `SDAList`; at a `Real` point a `Vector{SymExpr}`; unlike the NDA
+  kernel, the SDA one at a point takes nvars + length(m) temporary slots, so it too goes through
+  the retry, tested with the pool filled by garbage).
+  `simplify`, `MiraDAC.expand`, `MiraDAC.subs` act per coefficient and return a new SDA;
+  `evaluate(s, d::AbstractDict{<:Any,<:Real})` converts each key with `SymExpr`, so T5.5's
+  `SymEngine.Basic` keys work; `ArgumentError` if a symbol has no value.
 
 **T5.5 SymEngine.jl extension.** `julia/MiraDAC/ext/MiraDACSymEngineExt.jl`, with
 `[weakdeps] SymEngine` and `[extensions] MiraDACSymEngineExt = "SymEngine"` in `Project.toml`:
 `SymExpr(b::SymEngine.Basic)` and `SymEngine.Basic(x::SymExpr)` via strings; the `SDA`
 constructors and `evaluate` keys accept `SymEngine.Basic`. Tests in
 `test/test_symengine_ext.jl` (SymEngine added to the test target's extras).
+- *As built:* `[compat] SymEngine = "0.13"` (tested with 0.13.2, which loads `SymEngine_jll`'s
+  libsymengine 0.11.2). SymEngine.jl prints with its Julia printer (`x^2`, `exp(1)`) and parses
+  `**` too; MiraDAC's parser accepts `^`, so both directions round-trip ordinary expressions
+  (tested: powers, rationals, `sin`, `exp`, `pi`, `E`, floats). The imaginary unit does not
+  (SymEngine.jl prints `im`); complex symbolic work belongs in CSDA. The test uses
+  `import SymEngine`: `using` would make the unqualified `coeff` ambiguous.
 
 **T5.6 Coexistence of the two SymEngine libraries.**
 - Test: in one Julia process, `using SymEngine` then `using MiraDAC`, run SDA arithmetic and
@@ -671,6 +762,12 @@ constructors and `evaluate` keys accept `SymEngine.Basic`. Tests in
   `BUILD_SHARED_LIBS=OFF` and `-fPIC` into a separate prefix), link it into `libmiradac_c` with
   `-Wl,--exclude-libs,ALL` so none of its symbols are exported, and rerun the test. Report if it
   still fails.
+- *As built: no clash; the fallback was not applied.* `test/test_coexistence.jl` runs, in a
+  child Julia process per order (`import SymEngine` then `using MiraDAC`, and the reverse), SDA
+  arithmetic (`exp(a + sdavar(1)) * (1 + davar(2))`, its coefficients and `evaluate`) and
+  SymEngine.jl arithmetic (`expand((x + y)^3)`, `subs`, conversion both ways); both orders pass.
+  Run standalone, both processes have both libraries loaded (SymEngine_jll's `libsymengine.so`
+  0.11.2 and the pinned `libsymengine.so.0.14`).
 
 ### Stage 6 — CSDA
 
@@ -678,45 +775,151 @@ constructors and `evaluate` keys accept `SymEngine.Basic`. Tests in
 CSDA exists since commit `3394e13`), arithmetic with CSDA, SDA, expr, double and complex on both
 sides, allocating and in-place; functions (the CNDA set); `promote(cnda)`; `cd_composition` for
 `T = Expression`; `evaluate(csda, …) → cnda`.
+- *As built:* `capi/src/capi_csda.cpp`, tests `[csda]` in `capi/test/test_capi.cc`; the Expr, SDA
+  and CSDA handle helpers moved from `capi_sda.cpp` to `common.h`. Every function is wrapped in
+  `MDAC_SYM` as in T5.1 (a numeric-only scratch build compiles, and `capi_core` checks that the
+  CSDA stubs return `MDAC_ERR_UNSUPPORTED`). Lifecycle: `mdac_csda_new(re, im_or_null)`,
+  `_new_z(env, re, im)`, `_promote(cnda)`, `_copy`, `_free`, `_env`, `_real`/`_imag` (copies),
+  `_set_real`/`_set_imag`, `_to_string`. Operators named as for CNDA (T4.1): `mdac_csda_<op>`
+  (CSDA, CSDA), `_s`/`s<op>` (SDA), `_e`/`e<op>` (Expr), `_d`/`d<op>`, `_z`/`z<op>`, and
+  `mdac_sda_<op>_z`/`mdac_sda_z<op>` (SDA with a complex, giving a CSDA), each also `_into`
+  (`MDAC_CSDA_BINOP_DECL`; temporary then part-by-part copy, as for CNDA, so it can return
+  `MDAC_ERR_POOL`). No CSDA operator with an NDA or a CNDA (C++ has none; the Python binding has
+  none either). `mdac_csda_neg`, `_pow_i`, `_pow_d`, the CNDA function set (`sqrt exp log asin
+  acos atan asinh acosh atanh`, both forms) and `mdac_csda_abs` (an SDA, C++'s modulus).
+  `mdac_csda_evaluate(v, n, keys, vals, out_cnda)` uses the vector overload, as for SDA. Lists
+  `mdac_csdalist_*` as for CNDA; `cd_composition` forms, as new lists: `mdac_sdalist_compose_c`
+  (SDA map, CSDA arguments), `mdac_csdalist_compose`, `mdac_csdalist_compose_s` (CSDA map, SDA
+  arguments), with the checks of the CNDA forms. The ABI version stays 1 (functions only added).
+  The tests keep symbolic constant parts out of the function and `pow` inputs: `pow(z, 3)` of a CSDA
+  with symbolic constants took 12 s at order 4, and the complex functions ran out of memory
+  (16 GB) on such input; with numeric constants and symbolic higher coefficients (the usage of
+  `test_symbolic_cd.cc`) the whole `[csda]` set takes about 1 s.
 
 **T6.2 Julia.** `CSDA` type and methods as for CNDA, plus `SymExpr` operands; `CSDAList`. Tests
 ported from `python/tests/test_csda.py`, including the checks of
 `examples/example_complex_symbolic.cc`.
+- *As built:* `julia/MiraDAC/src/csda.jl`, tests `test/test_csda.jl` (plus a CSDA `evaluate`
+  with `SymEngine.Basic` keys in `test/test_symengine_ext.jl`). `CSDA(re, im)`, `CSDA(re)`,
+  `CSDA()` (exact zero parts), `CSDA(z::Number)` (doubles); `promote_sda(::CNDA)` gives a CSDA;
+  `real`/`imag` copies, no part setters (A.6, as for CNDA). Operators and in-place forms (`add!
+  sub! mul! div!`) for every pair of T6.1, with an `Integer` operand an exact `SymExpr` (as for
+  SDA); `-`, `^`, `literal_pow`; `sqrt! exp!` ... for the CNDA function set; `abs(::CSDA)` is an
+  `SDA`; `evaluate(z, d)` a `CNDA`; `compose(m, v)` for the three forms (a `CSDAList`). `sin`,
+  `MiraDAC.erf`, ... of a CSDA and CSDA ⊕ NDA/CNDA are `MethodError`s. `CSDA` and `CSDAList`
+  have their own free queues (`CSDA_QUEUE`, `CSLIST_QUEUE`); a 300-iteration loop with a pool of
+  40 exercises the retry. Not ported: the list form of `evaluate` and CSDA operators with a
+  `SymEngine.Basic` (Julia has neither for SDA). The CNDA check `@allocated == 0` for in-place
+  forms is not made for CSDA (nor was it for SDA): `@allocated` counts SymEngine's GMP
+  allocations, since SymEngine shares the `libgmp.so.10` Julia loads and Julia routes GMP's
+  memory functions through its counted allocator (`add!` 960 bytes, `exp!` ≈ 20 KB per call;
+  SDA `add!` 240 bytes, the same for every call, so no Julia object is left behind).
 
 ### Stage 7 — Multi-env API
 
 **T7.1 C API.** `mdac_*_import(env, v, out)` (via `da::import_to`) and
 `mdac_nda_promote_to(env, v, out)` (via `da::promote_to`); `mdac_*_env(v)` for every type.
+- *As built:* `mdac_nda_import`, `mdac_cnda_import` (part by part), `mdac_sda_import`,
+  `mdac_csda_import` and `mdac_nda_promote_to` (an `mdac_sda*`), next to each type's `_env`
+  function (the `_env` functions already existed for every type and list). Each takes an
+  `EnvGuard` on `v`'s env (`MDAC_ERR_ENV` if it was closed) and checks the target with `live`
+  (moved from `capi_core.cpp` to `common.h`): null or closed → `MDAC_ERR_ENV`; different layouts
+  → `MDAC_ERR_VALUE` (C++ `std::invalid_argument`). The symbolic three are `MDAC_SYM` stubs in a
+  numeric-only build (checked in `capi: mdac_has_symbolic`). No `mdac_cnda_promote_to`: the
+  plan names none, and Julia's `promote_sda(env, ::CNDA)` promotes the two parts. ABI version
+  stays 1 (functions only added). Tests `[multienv]` in `capi/test/test_capi.cc`.
 
 **T7.2 Julia `DAEnv`.** `DAEnv(order, nvars, poolsize; table=false)` (does not change the current
 env), `==` and `hash` by pointer, properties (`order`, `max_order`, `nvars`, `full_length`,
 `poolsize`, `count`, `remain`, `retired`), `close(env)` (idempotent), `with_env(f, env)`
 (exchange, then `try f() finally` restore), `with_order(f, env, n)`, an `env` keyword on every
 constructor and on `davar`/`sdavar`, `import_vec(env, v)`, `promote_sda(env, v)`.
+- *As built:* in `src/env.jl`; `import_vec` and `promote_sda(env, v)` methods next to each type.
+  `==` and `hash` are Julia's defaults for the immutable `DAEnv` struct, which compare and hash
+  its one field, the pointer (tested). `with_env` throws `EnvError` for a closed env, exchanges
+  with `mdac_env_exchange` and restores the previous env in `finally`. `with_order(f, n)` is now
+  `with_order(f, current_env(), n)`. The `env` keyword (default `nothing`: the current env) is on
+  `NDA(x)`, `NDA(coeffs)`, `davar`, `CNDA(z::Number)`, `SDA()`, `SDA(x)` (every form), `sdavar`,
+  `CSDA()`, `CSDA(z::Number)`; constructors from DA parts (`CNDA(re, im)`, `CSDA(re, im)`) take
+  the env of their parts, and lists have none. `promote_sda(env, ::CNDA)` is
+  `CSDA(promote_sda(env, real(v)), promote_sda(env, imag(v)))` (see T7.1). Exports `with_env`,
+  `import_vec`; `close` extends `Base.close`.
 
 **T7.3 Tests** (port of `python/tests/test_multienv.py`): two envs with different orders;
 operations on env-B vectors while env A is current; mixing envs throws `EnvError`; `close` with
 live vectors, then use throws `EnvError` and a GC afterwards is safe; `with_order` affects one env
 only; `inv_map` in a non-default env. Gate rerun.
+- *As built:* `test/test_multienv.jl` (129 tests, in `runtests.jl` after `test_env.jl`): env
+  creation and properties, `==`/`hash`/`show`, `with_env` nesting and restore on throw, the
+  `env` keyword on every constructor, `import_vec`/`promote_sda(env, v)` for every type (layout
+  mismatch → `ArgumentError`), mixing envs → `EnvError`, `close` with live NDA/CNDA vectors (use,
+  `import_vec`, `with_env`, `with_order` on the closed env → `EnvError`; then `GC.gc()` and
+  `MiraDAC.drain!()` are safe), closing the default env, `with_order(f, env, n)` on one env only,
+  `inv_map` in a non-default env (also after `clear!()`), a default env without user vectors
+  retired (not freed) by `clear!()`, a failed `DAEnv(4, 3, 2^31)` (`ErrorException`, the C++
+  `std::bad_alloc` as `MDAC_ERR_RUNTIME` per A.3, where Python has `MemoryError`) keeping the
+  current env, `erf` of an SDA in a non-default `table=true` env, and NDA, CNDA, SDA and CSDA operations
+  (arithmetic, functions, in-place, `der`/`integ`/`substitute`/`compose`/`inv_map`/
+  `evaluate_map`, `evaluate`) on env-B vectors giving the same result with env A current as with
+  B current. Not ported: Python's `TypeError` checks (dispatch rejects those arguments with
+  `MethodError` before any env logic) and the subprocess clean-exit test (the Julia suite itself
+  exits after closing envs with live vectors). Suites: C++ and ASan 1600
+  assertions, C API 3 ctest targets (`[multienv]` 657 assertions; numeric-only scratch build 55
+  cases pass), Python 212, Julia 1156. Gate rerun (2026-10-01, two runs): both exit 0, blocking PASS
+  (in-place below 1 µs at most +23.2 / +15.9 ns, above at most ratio 1.024 / 1.056); allocating
+  informational pass in run 1, and in run 2 (loaded machine) only `n6o6/mul_const` over, +426.8 ns. Table in `julia/MiraDAC/bench/REPORT.md`.
 
 ### Stage 8 — Docs, examples, CI
 
 **T8.1 Examples.** `julia/MiraDAC/examples/*.jl`: ports of `examples/examples.cc`,
 `example_interop.cc`, `example_complex_da.cc`, `example_1_symbolic.cc`,
 `example_complex_symbolic.cc`; each run by the test suite in a subprocess.
+- *As built:* same names with `.jl` (from the Python ports, `python/examples/`). Each script
+  calls `init!`, runs `main()` and `clear!()`; vectors print with `display` (the C++ table).
+  `examples.jl` uses the allocating `substitute`/`compose` (A.6 has no output-argument forms) and
+  skips C++'s `weighted_norm` (not in A.6); `example_complex_symbolic.jl` checks the evaluation
+  with a local port of `compare_cd_vectors` (relative, per coefficient) and exits 1 on a
+  mismatch, as does `example_interop.jl`. Output equals the C++ examples' up to float formatting
+  and slot numbers (checked for `examples.jl`). `test/test_examples.jl` runs each in its own
+  Julia process in a temporary directory (exit code 0, no "FAIL"), skipping the three symbolic
+  ones when `HAS_SYMBOLIC` is false.
 
 **T8.2 Docstrings and Documenter.** A docstring on every exported name;
 `julia/MiraDAC/docs/` (Documenter.jl, its own `docs/Project.toml`): Home, Getting started, NDA,
 CNDA, Symbolic, Multiple envs, Performance (the in-place API and the pool/GC behavior of A.5),
 API reference (`@autodocs`). `makedocs` runs without warnings (`warnonly = false`).
+- *As built:* only the module itself lacked a docstring; `runtests.jl` now checks
+  `isempty(Docs.undocumented_names(MiraDAC))` (Julia >= 1.11 only, the function is newer than
+  1.10). `docs/Project.toml` has Documenter 1 and MiraDAC by `[sources]` path; `julia/dev_setup.jl`
+  instantiates it and writes its `LocalPreferences.toml` as for `bench` (and runs
+  `Pkg.develop(path=...)` there on Julia 1.10, which ignores `[sources]`). The topical pages are
+  prose with plain `julia` blocks (not run by Documenter; every block was run by hand), so each
+  docstring appears once, in the API reference. `HTML(repolink = nothing, edit_link = nothing)`,
+  since there is no public repository (otherwise Documenter warns). Output in `docs/build`
+  (git-ignored). Build: `julia --project=julia/MiraDAC/docs julia/MiraDAC/docs/make.jl`, no
+  warnings.
 
 **T8.3 README.** A "Julia" section in the root `README.md`: build steps (C API and
 `dev_setup.jl`), the API example, and the thread and pool notes.
+- *As built:* section "Julia" after "Python", with the plan's commands, an example ported from
+  the Python README example (run as a script), and notes on pool/GC, threads, envs, 1-based
+  indices and SymEngine.jl.
 
 **T8.4 CI.** Extend the T0.5 job: run the examples and `docs/make.jl` (no deploy).
+- *As built:* steps "Examples" (each script in `$RUNNER_TEMP`, failing on a non-zero exit or
+  "FAIL"; symbolic ones skipped in the numeric-only cell) and "Docs (Documenter, no deploy)". The
+  YAML parses (`yaml.safe_load`); the job's commands were run locally in order with Julia 1.13.1
+  for both matrix values of `symbolic` (the OFF cell in a scratch copy of `julia/` with
+  `build/` linked to a numeric-only scratch build). The real CI run is pending a push; Julia 1.10
+  was not run locally (not installed).
 
 **T8.5 Numeric-only build.** Build with `-DWITH_SYMBOLIC=OFF -DDA_BUILD_CAPI=ON`; the Julia suite
 passes with the symbolic files skipped. Add it to the CI job matrix.
+- *As built:* matrix axis `symbolic: [ON, OFF]` on the `julia` job (so 4 cells); the SymEngine
+  cache and setup steps run only for ON, and the configure passes
+  `-DWITH_SYMBOLIC=${{ matrix.symbolic }}`. Locally: numeric-only scratch build, `ctest -R capi`
+  3/3, Julia suite 612 tests pass (symbolic test files and symbolic examples skipped), examples and docs build.
+  Symbolic build after Stage 8: C++ and ASan 1600 assertions, C API 3/3, Python 212, Julia 1163.
 
 ### Stage 9 — Distribution (needs the user's decisions first)
 

@@ -1,10 +1,10 @@
 # nda.jl — numeric DA vectors (plan T2.2, T2.3).
 
 """
-    NDA(x::Real)
-    NDA(coeffs::AbstractVector{<:Real})
+    NDA(x::Real; env=current_env())
+    NDA(coeffs::AbstractVector{<:Real}; env=current_env())
 
-A numeric DA vector of the current env: the constant `x`, or the coefficients `coeffs` in
+A numeric DA vector of `env`: the constant `x`, or the coefficients `coeffs` in
 monomial order (`coeffs(v)` gives them back). Not a `Number`; the operators and math functions
 are defined explicitly, with in-place forms (`add!`, `exp!`, ...) for hot loops.
 """
@@ -29,24 +29,24 @@ op_env(e::DAEnv) = getfield(e, :ptr)
     return NDA(out[])
 end
 
-function NDA(x::Real)
-    e = current_env_handle()
+function NDA(x::Real; env::Union{DAEnv,Nothing}=nothing)
+    e = env_handle(env)
     return new_nda(o -> mdac_nda_new(e, x, o), e)
 end
 
-function NDA(c::AbstractVector{<:Real})
-    e = current_env_handle()
+function NDA(c::AbstractVector{<:Real}; env::Union{DAEnv,Nothing}=nothing)
+    e = env_handle(env)
     c64 = convert(Vector{Float64}, c)
     return new_nda(o -> mdac_nda_from_coeffs(e, c64, length(c64), o), e)
 end
 
 """
-    davar(i)
+    davar(i; env=current_env())
 
-The `i`-th variable (1-based) of the current env: the vector with coefficient 1 for `x_i`.
+The `i`-th variable (1-based) of `env`: the vector with coefficient 1 for `x_i`.
 """
-function davar(i::Integer)
-    e = current_env()
+function davar(i::Integer; env::Union{DAEnv,Nothing}=nothing)
+    e = env === nothing ? current_env() : env
     n = e.nvars
     1 <= i <= n || throw(BoundsError(1:n, i))
     h = op_env(e)
@@ -58,6 +58,14 @@ Base.deepcopy_internal(v::NDA, d::IdDict) = get!(() -> copy(v), d, v)::NDA
 
 """The env of `v`."""
 env(v::NDA) = DAEnv(mdac_nda_env(v))
+
+"""
+    import_vec(env, v)
+
+A copy of `v` (`NDA`, `CNDA`, `SDA` or `CSDA`) in `env`; the current env does not change.
+`ArgumentError` if the two envs have different variables or orders.
+"""
+import_vec(e::DAEnv, v::NDA) = new_nda(o -> mdac_nda_import(e, v, o), e)
 
 # ---- Inspection -----------------------------------------------------------------------------
 

@@ -298,6 +298,246 @@ for f in (:mdac_ndalist_compose_c, :mdac_cndalist_compose, :mdac_cndalist_compos
                                 (Handle, Handle, Ptr{Handle}), m, v, out)
 end
 
+# ---- Symbolic: Expr --------------------------------------------------------------------------
+
+mdac_has_symbolic() = ccall((:mdac_has_symbolic, libmiradac), Cint, ())
+
+mdac_expr_new_d(x, out) = ccall((:mdac_expr_new_d, libmiradac), Cint, (Cdouble, Ptr{Handle}), x, out)
+mdac_expr_new_i(x, out) = ccall((:mdac_expr_new_i, libmiradac), Cint, (Int64, Ptr{Handle}), x, out)
+mdac_expr_parse(s, out) = ccall((:mdac_expr_parse, libmiradac), Cint, (Cstring, Ptr{Handle}), s, out)
+mdac_expr_symbol(s, out) = ccall((:mdac_expr_symbol, libmiradac), Cint, (Cstring, Ptr{Handle}), s, out)
+mdac_expr_copy(x, out) = ccall((:mdac_expr_copy, libmiradac), Cint, (Handle, Ptr{Handle}), x, out)
+mdac_expr_free(x) = ccall((:mdac_expr_free, libmiradac), Cvoid, (Handle,), x)
+mdac_expr_to_string(x, buf, cap, n) =
+    ccall((:mdac_expr_to_string, libmiradac), Cint, (Handle, Ptr{UInt8}, Csize_t, Ptr{Csize_t}),
+          x, buf, cap, n)
+mdac_expr_to_double(x, out) =
+    ccall((:mdac_expr_to_double, libmiradac), Cint, (Handle, Ptr{Cdouble}), x, out)
+
+for op in (:add, :sub, :mul, :div, :pow)
+    f, fd, df = Symbol(:mdac_expr_, op), Symbol(:mdac_expr_, op, :_d), Symbol(:mdac_expr_d, op)
+    @eval begin
+        $f(a, b, out) = ccall(($(QuoteNode(f)), libmiradac), Cint, (Handle, Handle, Ptr{Handle}), a, b, out)
+        $fd(a, x, out) = ccall(($(QuoteNode(fd)), libmiradac), Cint, (Handle, Cdouble, Ptr{Handle}), a, x, out)
+        $df(x, a, out) = ccall(($(QuoteNode(df)), libmiradac), Cint, (Cdouble, Handle, Ptr{Handle}), x, a, out)
+    end
+end
+
+mdac_expr_neg(a, out) = ccall((:mdac_expr_neg, libmiradac), Cint, (Handle, Ptr{Handle}), a, out)
+mdac_expr_eq(a, b, out) = ccall((:mdac_expr_eq, libmiradac), Cint, (Handle, Handle, Ptr{Cint}), a, b, out)
+mdac_expr_hash(a, out) = ccall((:mdac_expr_hash, libmiradac), Cint, (Handle, Ptr{UInt64}), a, out)
+mdac_expr_is_zero(a, out) = ccall((:mdac_expr_is_zero, libmiradac), Cint, (Handle, Ptr{Cint}), a, out)
+mdac_expr_subs(x, n, keys, vals, out) =
+    ccall((:mdac_expr_subs, libmiradac), Cint, (Handle, Csize_t, Ptr{Handle}, Ptr{Handle}, Ptr{Handle}),
+          x, n, keys, vals, out)
+for f in (:mdac_expr_expand, :mdac_expr_simplify)
+    @eval $f(x, out) = ccall(($(QuoteNode(f)), libmiradac), Cint, (Handle, Ptr{Handle}), x, out)
+end
+mdac_expr_diff(x, s, out) =
+    ccall((:mdac_expr_diff, libmiradac), Cint, (Handle, Handle, Ptr{Handle}), x, s, out)
+mdac_expr_free_symbols(x, buf, cap, n) =
+    ccall((:mdac_expr_free_symbols, libmiradac), Cint, (Handle, Ptr{Handle}, Csize_t, Ptr{Csize_t}),
+          x, buf, cap, n)
+
+# ---- Symbolic: SDA ---------------------------------------------------------------------------
+
+mdac_sda_new(e, x, out) = ccall((:mdac_sda_new, libmiradac), Cint, (Handle, Handle, Ptr{Handle}), e, x, out)
+mdac_sda_new_d(e, x, out) =
+    ccall((:mdac_sda_new_d, libmiradac), Cint, (Handle, Cdouble, Ptr{Handle}), e, x, out)
+mdac_sda_var(e, i, out) = ccall((:mdac_sda_var, libmiradac), Cint, (Handle, Cuint, Ptr{Handle}), e, i, out)
+mdac_sda_promote(v, out) = ccall((:mdac_sda_promote, libmiradac), Cint, (Handle, Ptr{Handle}), v, out)
+mdac_sda_copy(v, out) = ccall((:mdac_sda_copy, libmiradac), Cint, (Handle, Ptr{Handle}), v, out)
+mdac_sda_free(v) = ccall((:mdac_sda_free, libmiradac), Cvoid, (Handle,), v)
+mdac_sda_env(v) = ccall((:mdac_sda_env, libmiradac), Handle, (Handle,), v)
+mdac_sda_con(v, out) = ccall((:mdac_sda_con, libmiradac), Cint, (Handle, Ptr{Handle}), v, out)
+mdac_sda_length(v, out) = ccall((:mdac_sda_length, libmiradac), Cint, (Handle, Ptr{Csize_t}), v, out)
+mdac_sda_nterms(v, out) = ccall((:mdac_sda_nterms, libmiradac), Cint, (Handle, Ptr{Csize_t}), v, out)
+mdac_sda_coeffs(v, buf, cap, n) =
+    ccall((:mdac_sda_coeffs, libmiradac), Cint, (Handle, Ptr{Handle}, Csize_t, Ptr{Csize_t}), v, buf, cap, n)
+mdac_sda_coeff(v, exps, k, out) =
+    ccall((:mdac_sda_coeff, libmiradac), Cint, (Handle, Ptr{Cint}, Csize_t, Ptr{Handle}), v, exps, k, out)
+mdac_sda_index_term(v, i, exps, out) =
+    ccall((:mdac_sda_index_term, libmiradac), Cint, (Handle, Csize_t, Ptr{Cint}, Ptr{Handle}),
+          v, i, exps, out)
+mdac_sda_iszero(v, out) = ccall((:mdac_sda_iszero, libmiradac), Cint, (Handle, Ptr{Cint}), v, out)
+mdac_sda_to_string(v, buf, cap, n) =
+    ccall((:mdac_sda_to_string, libmiradac), Cint, (Handle, Ptr{UInt8}, Csize_t, Ptr{Csize_t}),
+          v, buf, cap, n)
+
+# The operand shapes of an SDA operator (miradac.h), as cnda_op_shapes.
+sda_op_shapes(op) = (
+    Symbol(:mdac_sda_, op) => (Handle, Handle),
+    Symbol(:mdac_sda_, op, :_n) => (Handle, Handle),
+    Symbol(:mdac_sda_n, op) => (Handle, Handle),
+    Symbol(:mdac_sda_, op, :_e) => (Handle, Handle),
+    Symbol(:mdac_sda_e, op) => (Handle, Handle),
+    Symbol(:mdac_sda_, op, :_d) => (Handle, Cdouble),
+    Symbol(:mdac_sda_d, op) => (Cdouble, Handle),
+    Symbol(:mdac_nda_, op, :_e) => (Handle, Handle),
+    Symbol(:mdac_nda_e, op) => (Handle, Handle))
+
+for op in (:add, :sub, :mul, :div), (f, types) in sda_op_shapes(op)
+    fi = Symbol(f, :_into)
+    @eval begin
+        $f(x1, x2, out) = ccall(($(QuoteNode(f)), libmiradac), Cint, ($(types...), Ptr{Handle}), x1, x2, out)
+        $fi(out, x1, x2) = ccall(($(QuoteNode(fi)), libmiradac), Cint, (Handle, $(types...)), out, x1, x2)
+    end
+end
+
+mdac_sda_neg(a, out) = ccall((:mdac_sda_neg, libmiradac), Cint, (Handle, Ptr{Handle}), a, out)
+mdac_sda_neg_into(out, a) = ccall((:mdac_sda_neg_into, libmiradac), Cint, (Handle, Handle), out, a)
+mdac_sda_pow_i(a, n, out) =
+    ccall((:mdac_sda_pow_i, libmiradac), Cint, (Handle, Cint, Ptr{Handle}), a, n, out)
+mdac_sda_pow_i_into(out, a, n) =
+    ccall((:mdac_sda_pow_i_into, libmiradac), Cint, (Handle, Handle, Cint), out, a, n)
+mdac_sda_pow_d(a, x, out) =
+    ccall((:mdac_sda_pow_d, libmiradac), Cint, (Handle, Cdouble, Ptr{Handle}), a, x, out)
+mdac_sda_pow_d_into(out, a, x) =
+    ccall((:mdac_sda_pow_d_into, libmiradac), Cint, (Handle, Handle, Cdouble), out, a, x)
+
+# C++ has no SDA asinh, acosh or atanh.
+const SDA_FUNCS = (:sqrt, :exp, :log, :sin, :cos, :tan, :asin, :acos, :atan,
+                   :sinh, :cosh, :tanh, :erf)
+
+for fn in SDA_FUNCS
+    f, fi = Symbol(:mdac_sda_, fn), Symbol(:mdac_sda_, fn, :_into)
+    @eval begin
+        $f(a, out) = ccall(($(QuoteNode(f)), libmiradac), Cint, (Handle, Ptr{Handle}), a, out)
+        $fi(out, a) = ccall(($(QuoteNode(fi)), libmiradac), Cint, (Handle, Handle), out, a)
+    end
+end
+
+for f in (:mdac_sda_simplify, :mdac_sda_expand)
+    @eval $f(v, out) = ccall(($(QuoteNode(f)), libmiradac), Cint, (Handle, Ptr{Handle}), v, out)
+end
+mdac_sda_subs(v, n, keys, vals, out) =
+    ccall((:mdac_sda_subs, libmiradac), Cint, (Handle, Csize_t, Ptr{Handle}, Ptr{Handle}, Ptr{Handle}),
+          v, n, keys, vals, out)
+mdac_sda_evaluate(v, n, keys, vals, out) =
+    ccall((:mdac_sda_evaluate, libmiradac), Cint,
+          (Handle, Csize_t, Ptr{Handle}, Ptr{Cdouble}, Ptr{Handle}), v, n, keys, vals, out)
+
+mdac_sdalist_new(out) = ccall((:mdac_sdalist_new, libmiradac), Cint, (Ptr{Handle},), out)
+mdac_sdalist_from(vs, n, out) =
+    ccall((:mdac_sdalist_from, libmiradac), Cint, (Ptr{Handle}, Csize_t, Ptr{Handle}), vs, n, out)
+mdac_sdalist_free(l) = ccall((:mdac_sdalist_free, libmiradac), Cvoid, (Handle,), l)
+mdac_sdalist_length(l) = ccall((:mdac_sdalist_length, libmiradac), Csize_t, (Handle,), l)
+mdac_sdalist_env(l) = ccall((:mdac_sdalist_env, libmiradac), Handle, (Handle,), l)
+mdac_sdalist_get(l, i, out) =
+    ccall((:mdac_sdalist_get, libmiradac), Cint, (Handle, Csize_t, Ptr{Handle}), l, i, out)
+mdac_sdalist_set(l, i, v) =
+    ccall((:mdac_sdalist_set, libmiradac), Cint, (Handle, Csize_t, Handle), l, i, v)
+mdac_sdalist_push(l, v) = ccall((:mdac_sdalist_push, libmiradac), Cint, (Handle, Handle), l, v)
+
+mdac_sda_der(v, i, out) = ccall((:mdac_sda_der, libmiradac), Cint, (Handle, Cuint, Ptr{Handle}), v, i, out)
+mdac_sda_integ(v, i, out) =
+    ccall((:mdac_sda_integ, libmiradac), Cint, (Handle, Cuint, Ptr{Handle}), v, i, out)
+mdac_sda_substitute_d(v, i, x, out) =
+    ccall((:mdac_sda_substitute_d, libmiradac), Cint, (Handle, Cuint, Cdouble, Ptr{Handle}), v, i, x, out)
+mdac_sda_substitute(v, i, x, out) =
+    ccall((:mdac_sda_substitute, libmiradac), Cint, (Handle, Cuint, Handle, Ptr{Handle}), v, i, x, out)
+mdac_sda_substitute_multi(v, ids, k, xs, out) =
+    ccall((:mdac_sda_substitute_multi, libmiradac), Cint,
+          (Handle, Ptr{Cuint}, Csize_t, Handle, Ptr{Handle}), v, ids, k, xs, out)
+mdac_sdalist_substitute(m, ids, k, xs, out) =
+    ccall((:mdac_sdalist_substitute, libmiradac), Cint,
+          (Handle, Ptr{Cuint}, Csize_t, Handle, Ptr{Handle}), m, ids, k, xs, out)
+mdac_sdalist_compose(m, v, out) =
+    ccall((:mdac_sdalist_compose, libmiradac), Cint, (Handle, Handle, Ptr{Handle}), m, v, out)
+mdac_sdalist_compose_d(m, pt, n, out) =
+    ccall((:mdac_sdalist_compose_d, libmiradac), Cint, (Handle, Ptr{Cdouble}, Csize_t, Ptr{Handle}),
+          m, pt, n, out)
+
+# ---- Symbolic: CSDA --------------------------------------------------------------------------
+
+mdac_csda_new(re, im, out) =
+    ccall((:mdac_csda_new, libmiradac), Cint, (Handle, Handle, Ptr{Handle}), re, im, out)
+mdac_csda_new_z(e, re, im, out) =
+    ccall((:mdac_csda_new_z, libmiradac), Cint, (Handle, Cdouble, Cdouble, Ptr{Handle}), e, re, im, out)
+mdac_csda_free(v) = ccall((:mdac_csda_free, libmiradac), Cvoid, (Handle,), v)
+mdac_csda_env(v) = ccall((:mdac_csda_env, libmiradac), Handle, (Handle,), v)
+for f in (:mdac_csda_promote, :mdac_csda_copy, :mdac_csda_real, :mdac_csda_imag, :mdac_csda_neg,
+          :mdac_csda_abs)
+    @eval $f(v, out) = ccall(($(QuoteNode(f)), libmiradac), Cint, (Handle, Ptr{Handle}), v, out)
+end
+mdac_csda_set_real(v, x) = ccall((:mdac_csda_set_real, libmiradac), Cint, (Handle, Handle), v, x)
+mdac_csda_set_imag(v, x) = ccall((:mdac_csda_set_imag, libmiradac), Cint, (Handle, Handle), v, x)
+mdac_csda_to_string(v, buf, cap, n) =
+    ccall((:mdac_csda_to_string, libmiradac), Cint, (Handle, Ptr{UInt8}, Csize_t, Ptr{Csize_t}),
+          v, buf, cap, n)
+
+# The operand shapes of a CSDA operator (miradac.h), as cnda_op_shapes.
+csda_op_shapes(op) = (
+    Symbol(:mdac_csda_, op) => (Handle, Handle),
+    Symbol(:mdac_csda_, op, :_s) => (Handle, Handle),
+    Symbol(:mdac_csda_s, op) => (Handle, Handle),
+    Symbol(:mdac_csda_, op, :_e) => (Handle, Handle),
+    Symbol(:mdac_csda_e, op) => (Handle, Handle),
+    Symbol(:mdac_csda_, op, :_d) => (Handle, Cdouble),
+    Symbol(:mdac_csda_d, op) => (Cdouble, Handle),
+    Symbol(:mdac_csda_, op, :_z) => (Handle, Cdouble, Cdouble),
+    Symbol(:mdac_csda_z, op) => (Cdouble, Cdouble, Handle),
+    Symbol(:mdac_sda_, op, :_z) => (Handle, Cdouble, Cdouble),
+    Symbol(:mdac_sda_z, op) => (Cdouble, Cdouble, Handle))
+
+for op in (:add, :sub, :mul, :div), (f, types) in csda_op_shapes(op)
+    fi = Symbol(f, :_into)
+    args = [Symbol(:x, k) for k in eachindex(types)]
+    @eval begin
+        $f($(args...), out) = ccall(($(QuoteNode(f)), libmiradac), Cint,
+                                    ($(types...), Ptr{Handle}), $(args...), out)
+        $fi(out, $(args...)) = ccall(($(QuoteNode(fi)), libmiradac), Cint,
+                                     (Handle, $(types...)), out, $(args...))
+    end
+end
+
+mdac_csda_neg_into(out, a) = ccall((:mdac_csda_neg_into, libmiradac), Cint, (Handle, Handle), out, a)
+mdac_csda_pow_i(a, n, out) =
+    ccall((:mdac_csda_pow_i, libmiradac), Cint, (Handle, Cint, Ptr{Handle}), a, n, out)
+mdac_csda_pow_i_into(out, a, n) =
+    ccall((:mdac_csda_pow_i_into, libmiradac), Cint, (Handle, Handle, Cint), out, a, n)
+mdac_csda_pow_d(a, x, out) =
+    ccall((:mdac_csda_pow_d, libmiradac), Cint, (Handle, Cdouble, Ptr{Handle}), a, x, out)
+mdac_csda_pow_d_into(out, a, x) =
+    ccall((:mdac_csda_pow_d_into, libmiradac), Cint, (Handle, Handle, Cdouble), out, a, x)
+
+for fn in CNDA_FUNCS
+    f, fi = Symbol(:mdac_csda_, fn), Symbol(:mdac_csda_, fn, :_into)
+    @eval begin
+        $f(a, out) = ccall(($(QuoteNode(f)), libmiradac), Cint, (Handle, Ptr{Handle}), a, out)
+        $fi(out, a) = ccall(($(QuoteNode(fi)), libmiradac), Cint, (Handle, Handle), out, a)
+    end
+end
+
+mdac_csda_evaluate(v, n, keys, vals, out) =
+    ccall((:mdac_csda_evaluate, libmiradac), Cint,
+          (Handle, Csize_t, Ptr{Handle}, Ptr{Cdouble}, Ptr{Handle}), v, n, keys, vals, out)
+
+mdac_csdalist_new(out) = ccall((:mdac_csdalist_new, libmiradac), Cint, (Ptr{Handle},), out)
+mdac_csdalist_from(vs, n, out) =
+    ccall((:mdac_csdalist_from, libmiradac), Cint, (Ptr{Handle}, Csize_t, Ptr{Handle}), vs, n, out)
+mdac_csdalist_free(l) = ccall((:mdac_csdalist_free, libmiradac), Cvoid, (Handle,), l)
+mdac_csdalist_length(l) = ccall((:mdac_csdalist_length, libmiradac), Csize_t, (Handle,), l)
+mdac_csdalist_env(l) = ccall((:mdac_csdalist_env, libmiradac), Handle, (Handle,), l)
+mdac_csdalist_get(l, i, out) =
+    ccall((:mdac_csdalist_get, libmiradac), Cint, (Handle, Csize_t, Ptr{Handle}), l, i, out)
+mdac_csdalist_set(l, i, v) =
+    ccall((:mdac_csdalist_set, libmiradac), Cint, (Handle, Csize_t, Handle), l, i, v)
+mdac_csdalist_push(l, v) = ccall((:mdac_csdalist_push, libmiradac), Cint, (Handle, Handle), l, v)
+
+for f in (:mdac_sdalist_compose_c, :mdac_csdalist_compose, :mdac_csdalist_compose_s)
+    @eval $f(m, v, out) = ccall(($(QuoteNode(f)), libmiradac), Cint,
+                                (Handle, Handle, Ptr{Handle}), m, v, out)
+end
+
+# ---- Multi-env (T7.1) -----------------------------------------------------------------------
+
+for f in (:mdac_nda_import, :mdac_cnda_import, :mdac_sda_import, :mdac_csda_import,
+          :mdac_nda_promote_to)
+    @eval $f(e, v, out) = ccall(($(QuoteNode(f)), libmiradac), Cint, (Handle, Handle, Ptr{Handle}),
+                                e, v, out)
+end
+
 # ---- Deferred frees (A.5 item 2) ------------------------------------------------------------
 #
 # A finalizer only queues the pointer. A pool has no lock and one env is used by one thread at a
@@ -328,7 +568,13 @@ const NDA_QUEUE = FreeQueue(mdac_nda_free, mdac_nda_env)
 const LIST_QUEUE = FreeQueue(mdac_ndalist_free, mdac_ndalist_env)   # an empty list has no env
 const CNDA_QUEUE = FreeQueue(mdac_cnda_free, mdac_cnda_env)
 const CLIST_QUEUE = FreeQueue(mdac_cndalist_free, mdac_cndalist_env)
-const FREE_QUEUES = (NDA_QUEUE, LIST_QUEUE, CNDA_QUEUE, CLIST_QUEUE)
+const EXPR_QUEUE = FreeQueue(mdac_expr_free, Returns(C_NULL))       # no env: always freed
+const SDA_QUEUE = FreeQueue(mdac_sda_free, mdac_sda_env)
+const SLIST_QUEUE = FreeQueue(mdac_sdalist_free, mdac_sdalist_env)
+const CSDA_QUEUE = FreeQueue(mdac_csda_free, mdac_csda_env)
+const CSLIST_QUEUE = FreeQueue(mdac_csdalist_free, mdac_csdalist_env)
+const FREE_QUEUES = (NDA_QUEUE, LIST_QUEUE, CNDA_QUEUE, CLIST_QUEUE, EXPR_QUEUE, SDA_QUEUE, SLIST_QUEUE,
+                     CSDA_QUEUE, CSLIST_QUEUE)
 
 """The finalizer of every handle type: queue the pointer, or retry at the next GC."""
 function defer_free(q::FreeQueue, obj)

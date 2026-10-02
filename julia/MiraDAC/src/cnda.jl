@@ -43,8 +43,8 @@ end
 CNDA(re::NDA, im::NDA) = new_cnda(o -> mdac_cnda_new(re, im, o), re)
 CNDA(re::NDA) = new_cnda(o -> mdac_cnda_new(re, C_NULL, o), re)
 
-function CNDA(z::Number)
-    e = current_env_handle()
+function CNDA(z::Number; env::Union{DAEnv,Nothing}=nothing)
+    e = env_handle(env)
     return new_cnda(o -> mdac_cnda_new_z(e, real(z), imag(z), o), e)
 end
 
@@ -52,6 +52,7 @@ Base.copy(v::CNDA) = new_cnda(o -> mdac_cnda_copy(v, o), v)
 Base.deepcopy_internal(v::CNDA, d::IdDict) = get!(() -> copy(v), d, v)::CNDA
 
 env(v::CNDA) = DAEnv(mdac_cnda_env(v))
+import_vec(e::DAEnv, v::CNDA) = new_cnda(o -> mdac_cnda_import(e, v, o), e)
 
 """`real(v::CNDA)`: a copy of the real part."""
 Base.real(v::CNDA) = new_nda(o -> mdac_cnda_real(v, o), v)

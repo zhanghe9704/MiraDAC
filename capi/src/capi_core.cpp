@@ -4,6 +4,10 @@
 
 #include <string>
 
+#ifdef DA_WITH_SYMBOLIC
+#include <symengine/symengine_exception.h>
+#endif
+
 using namespace mdac;
 
 namespace {
@@ -53,13 +57,6 @@ void clear_default() {
     g_default = nullptr;
 }
 
-da::DAEnv& live(mdac_env* h) {
-    da::DAEnv* e = env(h);
-    if (!e) throw EnvError("no DA environment");
-    if (e->retired()) throw EnvError("DA environment has been cleared");
-    return *e;
-}
-
 } // namespace
 
 mdac_status mdac::current_exception_status() noexcept {
@@ -73,6 +70,10 @@ mdac_status mdac::current_exception_status() noexcept {
         return fail(MDAC_ERR_VALUE, e.what());
     } catch (const std::domain_error& e) {
         return fail(MDAC_ERR_VALUE, e.what());
+#ifdef DA_WITH_SYMBOLIC
+    } catch (const SymEngine::SymEngineException& e) {  // parse, eval, missing symbol
+        return fail(MDAC_ERR_VALUE, e.what());
+#endif
     } catch (const std::out_of_range& e) {
         return fail(MDAC_ERR_INDEX, e.what());
     } catch (const std::logic_error& e) {  // da::check_env
@@ -84,7 +85,13 @@ mdac_status mdac::current_exception_status() noexcept {
     }
 }
 
+mdac_status mdac::unsupported() noexcept {
+    return fail(MDAC_ERR_UNSUPPORTED, "MiraDAC was built without symbolic support");
+}
+
 extern "C" {
+
+int mdac_has_symbolic(void) { return MDAC_SYM_ELSE(0, 1); }
 
 int mdac_abi_version(void) { return MDAC_ABI_VERSION; }
 

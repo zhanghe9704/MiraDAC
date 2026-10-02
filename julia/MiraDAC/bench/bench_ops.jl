@@ -5,8 +5,9 @@
 # Then ROUNDS rounds each give every case 0.2 s of samples (at least one), and a case reports
 # its minimum sample, in thread CPU time (garbage collections inside a sample count). The C++
 # numbers come from a fresh `bench_cpp --driven` child (same CPU pinning, inherited), which
-# runs one round before each Julia round. Prints the table and the gate of plan A.9, and exits
-# 1 if the gate fails.
+# runs one round before each Julia round. Prints the table and the gate of plan A.9: in-place
+# cases are blocking, allocating ones informational until `dascope` lands. Exits 1 only if the
+# blocking gate fails.
 #
 # Run: taskset -c 5 julia --project=julia/MiraDAC/bench julia/MiraDAC/bench/bench_ops.jl \
 #          [--rounds N] [--cpp PATH]
@@ -165,12 +166,12 @@ cpp_case(name) = replace(name, "!" => "")
 
 const IN_PLACE = ("iadd", "add!", "mul!", "exp!")
 
-# Plan A.9 (revised): one rule per case, chosen by its C++ time; below 1 us the overhead limit
-# is 60 ns in place and 400 ns for allocating operations.
+is_in_place(name) = split(name, "/")[2] in IN_PLACE
+
 # Plan A.9: in-place cases get one rule by C++ time; allocating cases pass if
 # their overhead is <= 400 ns or their ratio is <= 1.5 (user decision 2026-10-01).
 function gate(name, cpp, jl)
-    if split(name, "/")[2] in IN_PLACE
+    if is_in_place(name)
         cpp >= 1000 && return "ratio <= 1.10", jl / cpp <= 1.10
         return "overhead <= 60", jl - cpp <= 60
     end
@@ -207,23 +208,26 @@ function main(args)
     success(child) || error("$cpp exited with $(child.exitcode)")
     cpp_ns = parse_json_numbers(out)
 
-    ok = true
+    ok = Dict(true => true, false => true)   # keyed by is_in_place
     @printf("%-20s%16s%16s%14s%8s  %s\n", "case", "C++ ns", "Julia ns", "overhead ns", "ratio", "gate")
     for name in names
         if haskey(errors, name)
-            ok = false
+            ok[is_in_place(name)] = false
             @printf("%-20s%16.1f%16s%14s%8s  FAIL: %s\n", name, cpp_ns[cpp_case(name)], "error", "", "",
                     errors[name])
             continue
         end
         c, jl = cpp_ns[cpp_case(name)], best_ns[name]
         rule, pass = gate(name, c, jl)
-        ok &= pass
+        ok[is_in_place(name)] &= pass
         @printf("%-20s%16.1f%16.1f%14.1f%8.3f  %s: %s\n", name, c, jl, jl - c, jl / c, rule,
                 pass ? "pass" : "FAIL")
     end
-    println("gate: ", ok ? "PASS" : "FAIL")
-    return ok ? 0 : 1
+    println("gate (blocking): ", ok[true] ? "PASS" : "FAIL")
+    println("allocating (informational): ", ok[false] ? "pass" : "fail",
+            join([" $n" for n in names if !is_in_place(n) &&
+                  (haskey(errors, n) || !gate(n, cpp_ns[cpp_case(n)], best_ns[n])[2])], ","))
+    return ok[true] ? 0 : 1
 end
 
 exit(main(ARGS))

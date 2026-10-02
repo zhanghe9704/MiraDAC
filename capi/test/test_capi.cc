@@ -1,4 +1,4 @@
-// test_capi.cc — the C API against direct C++ results (plan T1.2-T1.5).
+// test_capi.cc — the C API against direct C++ results (plan T1.2-T7.1).
 //
 // The C API library holds its own hidden copy of the da library, so the C++
 // reference vectors below live in a separate default env of the same shape.
@@ -9,6 +9,7 @@
 
 #include <cmath>
 #include <complex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -1272,3 +1273,1019 @@ TEST_CASE("capi: cd_composition equals C++", "[capi][cnda][algo]") {
     REQUIRE(mdac_ndalist_compose_c(m, two, bad.out()) == MDAC_ERR_VALUE);
     REQUIRE(mdac_cndalist_compose_n(cm, m, bad.out()) == MDAC_ERR_VALUE);
 }
+
+// ---- Multi-env (T7.1) -----------------------------------------------------------
+
+TEST_CASE("capi: import copies NDA and CNDA into another env", "[capi][multienv]") {
+    Envs envs;
+    mdac_env *b = nullptr, *small = nullptr;
+    OK(mdac_env_make(kOrder, kNvars, 20, 0, &b));
+    OK(mdac_env_make(2, 2, 20, 0, &small));
+    H x(from(envs.env, input(1.5, 0.7)));
+    H y;
+    OK(mdac_nda_import(b, x, y.out()));
+    REQUIRE(mdac_nda_env(y) == b);
+    REQUIRE(env_count(b) == 1);
+    mdac_env* cur = nullptr;
+    OK(mdac_env_current(&cur));
+    REQUIRE(cur == envs.env);
+    require_same(coeffs(y), coeffs(x));
+    H z;
+    OK(mdac_nda_import(envs.env, y, z.out()));
+    REQUIRE(mdac_nda_env(z) == envs.env);
+    require_same(coeffs(z), coeffs(x));
+
+    C c, cb;
+    OK(mdac_cnda_new(x, z, c.out()));
+    OK(mdac_cnda_import(b, c, cb.out()));
+    REQUIRE(mdac_cnda_env(cb) == b);
+    H re, im;
+    OK(mdac_cnda_real(cb, re.out()));
+    OK(mdac_cnda_imag(cb, im.out()));
+    require_same(coeffs(re), coeffs(x));
+    require_same(coeffs(im), coeffs(x));
+
+    H bad;
+    REQUIRE(mdac_nda_import(small, x, bad.out()) == MDAC_ERR_VALUE);   // different layout
+    C cbad;
+    REQUIRE(mdac_cnda_import(small, c, cbad.out()) == MDAC_ERR_VALUE);
+    REQUIRE(mdac_nda_import(nullptr, x, bad.out()) == MDAC_ERR_ENV);
+    mdac_nda_free(y.p);
+    y.p = nullptr;
+    mdac_cnda_free(cb.p);
+    cb.p = nullptr;
+    OK(mdac_env_close(b));
+    REQUIRE(mdac_nda_import(b, x, bad.out()) == MDAC_ERR_ENV);         // closed target
+    REQUIRE(mdac_cnda_import(b, c, cbad.out()) == MDAC_ERR_ENV);
+    OK(mdac_env_close(small));
+}
+
+TEST_CASE("capi: importing from a closed env fails", "[capi][multienv]") {
+    Envs envs;
+    mdac_env* b = nullptr;
+    OK(mdac_env_make(kOrder, kNvars, 20, 0, &b));
+    H x;
+    OK(mdac_nda_var(b, 0, x.out()));
+    OK(mdac_env_close(b));
+    H y;
+    REQUIRE(mdac_nda_import(envs.env, x, y.out()) == MDAC_ERR_ENV);
+    REQUIRE(mdac_nda_env(x) == b);
+}
+
+// ---- Symbolic: Expr and SDA (T5.1, T5.2) ---------------------------------------
+
+TEST_CASE("capi: mdac_has_symbolic", "[capi][sym]") {
+#ifdef DA_WITH_SYMBOLIC
+    REQUIRE(mdac_has_symbolic() == 1);
+#else
+    REQUIRE(mdac_has_symbolic() == 0);
+    mdac_expr* x = nullptr;
+    REQUIRE(mdac_expr_new_d(1.0, &x) == MDAC_ERR_UNSUPPORTED);
+    REQUIRE(std::string(mdac_last_error()).find("symbolic") != std::string::npos);
+    Envs envs;
+    mdac_csda* c = nullptr;
+    REQUIRE(mdac_csda_new_z(envs.env, 1.0, 0.0, &c) == MDAC_ERR_UNSUPPORTED);
+    mdac_csdalist* l = nullptr;
+    REQUIRE(mdac_csdalist_new(&l) == MDAC_ERR_UNSUPPORTED);
+    REQUIRE(mdac_csdalist_length(l) == 0);
+    REQUIRE(mdac_csda_env(c) == nullptr);
+    mdac_csda_free(c);
+    mdac_sda* sp = nullptr;
+    REQUIRE(mdac_nda_promote_to(envs.env, nullptr, &sp) == MDAC_ERR_UNSUPPORTED);
+    REQUIRE(mdac_sda_import(envs.env, nullptr, &sp) == MDAC_ERR_UNSUPPORTED);
+    REQUIRE(mdac_csda_import(envs.env, nullptr, &c) == MDAC_ERR_UNSUPPORTED);
+#endif
+}
+
+#ifdef DA_WITH_SYMBOLIC
+
+#include <symengine/parser.h>
+
+namespace {
+
+using SymEngine::Expression;
+
+// Owns a C API Expr.
+struct EX {
+    mdac_expr* p = nullptr;
+    EX() = default;
+    explicit EX(mdac_expr* q) : p(q) {}
+    EX(const EX&) = delete;
+    EX& operator=(const EX&) = delete;
+    ~EX() { mdac_expr_free(p); }
+    operator mdac_expr*() const { return p; }
+    mdac_expr** out() { return &p; }
+};
+
+// Owns a C API SDA.
+struct S {
+    mdac_sda* p = nullptr;
+    S() = default;
+    explicit S(mdac_sda* q) : p(q) {}
+    S(const S&) = delete;
+    S& operator=(const S&) = delete;
+    ~S() { mdac_sda_free(p); }
+    operator mdac_sda*() const { return p; }
+    mdac_sda** out() { return &p; }
+};
+
+// Owns a C API SDA list.
+struct SL {
+    mdac_sdalist* p = nullptr;
+    SL() = default;
+    SL(const SL&) = delete;
+    SL& operator=(const SL&) = delete;
+    ~SL() { mdac_sdalist_free(p); }
+    operator mdac_sdalist*() const { return p; }
+    mdac_sdalist** out() { return &p; }
+};
+
+std::string str(const mdac_expr* x) {
+    size_t n = 0;
+    OK(mdac_expr_to_string(x, nullptr, 0, &n));
+    std::string s(n, '\0');
+    OK(mdac_expr_to_string(x, s.data(), n, &n));
+    s.resize(n - 1);
+    return s;
+}
+
+std::string str(const Expression& e) {
+    std::ostringstream os;
+    os << e;
+    return os.str();
+}
+
+mdac_expr* parse(const char* s) {
+    mdac_expr* x = nullptr;
+    OK(mdac_expr_parse(s, &x));
+    return x;
+}
+
+std::vector<std::string> scoeffs(const mdac_sda* v) {
+    size_t n = 0;
+    OK(mdac_sda_coeffs(v, nullptr, 0, &n));
+    std::vector<mdac_expr*> buf(n);
+    OK(mdac_sda_coeffs(v, buf.data(), n, &n));
+    std::vector<std::string> out;
+    for (mdac_expr* x : buf) {
+        out.push_back(str(x));
+        mdac_expr_free(x);
+    }
+    return out;
+}
+
+std::vector<std::string> scoeffs(const da::SDA& v) {
+    const Expression* p = v.env_->pool<Expression>().slot(v.slot_);
+    std::vector<std::string> out;
+    for (unsigned i = 0; i < v.length(); ++i) out.push_back(str(p[i]));
+    return out;
+}
+
+void require_same(const mdac_sda* c, const da::SDA& r) { REQUIRE(scoeffs(c) == scoeffs(r)); }
+
+// The test inputs: coefficients (as text) of the monomials in exps, in both APIs.
+const std::vector<std::vector<int>> kExps = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}, {1, 1, 0}, {0, 0, 2}};
+
+mdac_sda* sfrom(mdac_env* e, const std::vector<const char*>& cs) {
+    mdac_sda* v = nullptr;
+    OK(mdac_sda_new(e, nullptr, &v));
+    for (size_t i = 0; i < cs.size(); ++i) {
+        EX x(parse(cs[i]));
+        OK(mdac_sda_set_coeff(v, kExps[i].data(), kExps[i].size(), x));
+    }
+    return v;
+}
+
+da::SDA sref(const std::vector<const char*>& cs) {
+    da::SDA v;
+    for (size_t i = 0; i < cs.size(); ++i) v.set_element(kExps[i], Expression(SymEngine::parse(cs[i])));
+    return v;
+}
+
+template <class F, class G>
+void sboth(mdac_sda* o, F alloc, G into, const da::SDA& want) {
+    {
+        S r;
+        OK(alloc(r.out()));
+        require_same(r, want);
+    }
+    OK(into(o));
+    require_same(o, want);
+}
+
+#define SALLOC(expr) [&](mdac_sda** r_) { return expr; }
+#define SINTO(expr) [&](mdac_sda* t_) { return expr; }
+
+#define SDA_OP(name, op)                                                                          \
+    SECTION(#name) {                                                                              \
+        sboth(o, SALLOC(mdac_sda_##name(a, b, r_)), SINTO(mdac_sda_##name##_into(t_, a, b)), ra op rb); \
+        sboth(o, SALLOC(mdac_sda_##name##_n(a, x, r_)), SINTO(mdac_sda_##name##_n_into(t_, a, x)), ra op rx); \
+        sboth(o, SALLOC(mdac_sda_n##name(x, a, r_)), SINTO(mdac_sda_n##name##_into(t_, x, a)), rx op ra); \
+        sboth(o, SALLOC(mdac_sda_##name##_e(a, ex, r_)), SINTO(mdac_sda_##name##_e_into(t_, a, ex)), ra op rex); \
+        sboth(o, SALLOC(mdac_sda_e##name(ex, a, r_)), SINTO(mdac_sda_e##name##_into(t_, ex, a)), rex op ra); \
+        sboth(o, SALLOC(mdac_sda_##name##_d(a, d, r_)), SINTO(mdac_sda_##name##_d_into(t_, a, d)), ra op d); \
+        sboth(o, SALLOC(mdac_sda_d##name(d, a, r_)), SINTO(mdac_sda_d##name##_into(t_, d, a)), d op ra); \
+        sboth(o, SALLOC(mdac_nda_##name##_e(x, ex, r_)), SINTO(mdac_nda_##name##_e_into(t_, x, ex)), rx op rex); \
+        sboth(o, SALLOC(mdac_nda_e##name(ex, x, r_)), SINTO(mdac_nda_e##name##_into(t_, ex, x)), rex op rx); \
+        S a1(sfrom(e, ca)), b1(sfrom(e, cb));                                                     \
+        OK(mdac_sda_##name##_into(a1, a1, b));                                                    \
+        require_same(a1, ra op rb);                                                               \
+        OK(mdac_sda_##name##_into(b1, a, b1));                                                    \
+        require_same(b1, ra op rb);                                                               \
+    }
+
+const std::vector<const char*> ca = {"1 + a", "b", "2", "a*b", "1/3"};
+const std::vector<const char*> cb = {"2", "a", "0", "0", "b**2"};
+
+} // namespace
+
+TEST_CASE("capi: Expr lifecycle and conversions", "[capi][sym][expr]") {
+    EX d, i, p, s, c, big;
+    OK(mdac_expr_new_d(0.25, d.out()));
+    OK(mdac_expr_new_i(3, i.out()));
+    OK(mdac_expr_new_i(INT64_MIN, big.out()));
+    OK(mdac_expr_symbol("a", s.out()));
+    p.p = parse("a + 2*b");
+    OK(mdac_expr_copy(p, c.out()));
+    REQUIRE(str(d) == str(Expression(0.25)));
+    REQUIRE(str(i) == "3");
+    REQUIRE(str(big) == "-9223372036854775808");
+    REQUIRE(str(s) == "a");
+    REQUIRE(str(c) == str(Expression(SymEngine::parse("a + 2*b"))));
+
+    size_t n = 0;
+    char buf[4];
+    OK(mdac_expr_to_string(p, buf, sizeof buf, &n));
+    REQUIRE(n == str(p).size() + 1);
+    REQUIRE(std::string(buf) == str(p).substr(0, 3));
+
+    double v = 0;
+    OK(mdac_expr_to_double(d, &v));
+    REQUIRE(v == 0.25);
+    EX sin1(parse("sin(1) + 2"));
+    OK(mdac_expr_to_double(sin1, &v));
+    REQUIRE(v == Approx(std::sin(1.0) + 2));
+    REQUIRE(mdac_expr_to_double(p, &v) == MDAC_ERR_VALUE);
+    REQUIRE(std::string(mdac_last_error()).size() > 0);
+
+    EX bad;
+    REQUIRE(mdac_expr_parse("a +* b", bad.out()) == MDAC_ERR_VALUE);
+    REQUIRE(bad.p == nullptr);
+}
+
+TEST_CASE("capi: Expr arithmetic and methods equal C++", "[capi][sym][expr]") {
+    const Expression ra(SymEngine::symbol("a")), rb(SymEngine::symbol("b"));
+    EX a, b;
+    OK(mdac_expr_symbol("a", a.out()));
+    OK(mdac_expr_symbol("b", b.out()));
+    const double d = 1.5;
+    auto check = [](mdac_status st, EX& r, const Expression& want) {
+        REQUIRE(st == MDAC_OK);
+        REQUIRE(str(r) == str(want));
+    };
+#define EXPR_OP(name, expr_ab, expr_ad, expr_da)                     \
+    {                                                                \
+        EX r1, r2, r3;                                                \
+        check(mdac_expr_##name(a, b, r1.out()), r1, expr_ab);        \
+        check(mdac_expr_##name##_d(a, d, r2.out()), r2, expr_ad);    \
+        check(mdac_expr_d##name(d, a, r3.out()), r3, expr_da);       \
+    }
+    EXPR_OP(add, ra + rb, ra + Expression(d), Expression(d) + ra)
+    EXPR_OP(sub, ra - rb, ra - Expression(d), Expression(d) - ra)
+    EXPR_OP(mul, ra * rb, ra * Expression(d), Expression(d) * ra)
+    EXPR_OP(div, ra / rb, ra / Expression(d), Expression(d) / ra)
+    EXPR_OP(pow, SymEngine::pow(ra, rb), SymEngine::pow(ra, Expression(d)),
+            SymEngine::pow(Expression(d), ra))
+#undef EXPR_OP
+    EX ng;
+    check(mdac_expr_neg(a, ng.out()), ng, -ra);
+
+    EX s1, s2;
+    OK(mdac_expr_add(a, b, s1.out()));
+    OK(mdac_expr_add(b, a, s2.out()));
+    int eq = 0;
+    OK(mdac_expr_eq(s1, s2, &eq));
+    REQUIRE(eq == 1);
+    OK(mdac_expr_eq(a, b, &eq));
+    REQUIRE(eq == 0);
+    uint64_t h1 = 0, h2 = 0;
+    OK(mdac_expr_hash(s1, &h1));
+    OK(mdac_expr_hash(s2, &h2));
+    REQUIRE(h1 == h2);
+
+    EX sq(parse("(a + b)**2")), ex, df, sm, sb;
+    check(mdac_expr_expand(sq, ex.out()), ex, SymEngine::expand(Expression(SymEngine::parse("(a + b)**2"))));
+    check(mdac_expr_diff(sq, a, df.out()), df, Expression(SymEngine::parse("2*(a + b)")));
+    EX notsym;
+    REQUIRE(mdac_expr_diff(sq, s1, notsym.out()) == MDAC_ERR_VALUE);
+    EX twice(parse("a*2/2"));
+    check(mdac_expr_simplify(twice, sm.out()), sm, ra);
+    EX one;
+    OK(mdac_expr_new_d(1.0, one.out()));
+    const mdac_expr* keys[] = {a, b};
+    const mdac_expr* vals[] = {one, a};
+    check(mdac_expr_subs(sq, 2, keys, vals, sb.out()), sb, Expression(SymEngine::parse("(1.0 + a)**2")));
+
+    int z = -1;
+    EX diff0;
+    OK(mdac_expr_sub(ex, sq, diff0.out()));
+    OK(mdac_expr_is_zero(diff0, &z));
+    REQUIRE(z == 1);
+    OK(mdac_expr_is_zero(sq, &z));
+    REQUIRE(z == 0);
+
+    size_t n = 0;
+    OK(mdac_expr_free_symbols(sq, nullptr, 0, &n));
+    REQUIRE(n == 2);
+    mdac_expr* syms[2] = {nullptr, nullptr};
+    OK(mdac_expr_free_symbols(sq, syms, 1, &n));
+    REQUIRE(n == 2);
+    REQUIRE(syms[1] == nullptr);
+    mdac_expr_free(syms[0]);
+    OK(mdac_expr_free_symbols(sq, syms, 2, &n));
+    std::set<std::string> names = {str(syms[0]), str(syms[1])};
+    REQUIRE(names == std::set<std::string>{"a", "b"});
+    mdac_expr_free(syms[0]);
+    mdac_expr_free(syms[1]);
+}
+
+TEST_CASE("capi: SDA lifecycle and inspection", "[capi][sym][sda]") {
+    Envs envs;
+    mdac_env* e = envs.env;
+    S zero, c, cd, v, p, cp;
+    OK(mdac_sda_new(e, nullptr, zero.out()));
+    REQUIRE(scoeffs(zero) == std::vector<std::string>{"0"});
+    EX ex(parse("a"));
+    OK(mdac_sda_new(e, ex, c.out()));
+    REQUIRE(scoeffs(c) == std::vector<std::string>{"a"});
+    OK(mdac_sda_new_d(e, 1.5, cd.out()));
+    require_same(cd, da::SDA(1.5));
+    OK(mdac_sda_var(e, 1, v.out()));
+    require_same(v, da::promote(da::da_base(1)));
+    S bad;
+    REQUIRE(mdac_sda_var(e, kNvars, bad.out()) == MDAC_ERR_INDEX);
+
+    const da::NDA rx = nda(1.5, 2.0);
+    H x(from(e, coeffs(rx)));
+    OK(mdac_sda_promote(x, p.out()));
+    require_same(p, da::promote(rx));
+
+    S a(sfrom(e, ca));
+    const da::SDA ra = sref(ca);
+    require_same(a, ra);
+    OK(mdac_sda_copy(a, cp.out()));
+    REQUIRE(cp.p != a.p);
+    require_same(cp, ra);
+    REQUIRE(mdac_sda_env(a) == e);
+
+    EX con;
+    OK(mdac_sda_con(a, con.out()));
+    REQUIRE(str(con) == "1 + a");
+    size_t len = 0, nt = 0;
+    OK(mdac_sda_length(a, &len));
+    OK(mdac_sda_nterms(a, &nt));
+    REQUIRE(len == ra.length());
+    REQUIRE(nt == static_cast<size_t>(const_cast<da::SDA&>(ra).n_element()));
+
+    EX k;
+    const int ab[] = {1, 1};
+    OK(mdac_sda_coeff(a, ab, 2, k.out()));
+    REQUIRE(str(k) == "a*b");
+    const int neg[] = {-1, 0, 0};
+    EX kneg;
+    REQUIRE(mdac_sda_coeff(a, neg, 3, kneg.out()) == MDAC_ERR_VALUE);
+    REQUIRE(mdac_sda_set_coeff(a, neg, 3, ex) == MDAC_ERR_VALUE);
+
+    int exps[kNvars] = {};
+    EX t;
+    OK(mdac_sda_index_term(a, 1, exps, t.out()));
+    std::vector<unsigned> rexps(kNvars);
+    Expression rt;
+    da::detail::ad_elem(ra.env_->layout(), ra.env_->pool<Expression>(), ra.slot_, 2, rexps.data(), rt);
+    REQUIRE(str(t) == str(rt));
+    REQUIRE(std::vector<int>(exps, exps + kNvars) == std::vector<int>(rexps.begin(), rexps.end()));
+    EX tbad;
+    REQUIRE(mdac_sda_index_term(a, da::NDA::full_length(), exps, tbad.out()) == MDAC_ERR_INDEX);
+
+    // The operator<< text; its first line names the slot.
+    size_t n = 0;
+    OK(mdac_sda_to_string(a, nullptr, 0, &n));
+    std::string text(n, '\0');
+    OK(mdac_sda_to_string(a, text.data(), n, &n));
+    text.resize(n - 1);
+    std::ostringstream os;
+    os << ra;
+    REQUIRE(text.substr(text.find('\n')) == os.str().substr(os.str().find('\n')));
+
+    int z = -1;
+    OK(mdac_sda_iszero(a, &z));
+    REQUIRE(z == 0);
+    S diff;
+    OK(mdac_sda_sub(a, a, diff.out()));
+    OK(mdac_sda_iszero(diff, &z));
+    REQUIRE(z == 1);
+    S u(sfrom(e, {"1", "a - a"}));
+    OK(mdac_sda_clean(u));
+    OK(mdac_sda_length(u, &len));
+    REQUIRE(len == 1);
+    OK(mdac_sda_set_con(cp, ex));
+    REQUIRE(scoeffs(cp) == std::vector<std::string>{"a"});
+    OK(mdac_sda_reset(cp));
+    OK(mdac_sda_iszero(cp, &z));
+    REQUIRE(z == 1);
+}
+
+TEST_CASE("capi: SDA arithmetic equals C++", "[capi][sym][sda]") {
+    Envs envs;
+    mdac_env* e = envs.env;
+    const da::SDA ra = sref(ca), rb = sref(cb);
+    const da::NDA rx = nda(0.9, -1.0);
+    const Expression rex = SymEngine::parse("b + 1/2");
+    const double d = 1.25;
+    S a(sfrom(e, ca)), b(sfrom(e, cb)), o(sfrom(e, {"7"}));
+    H x(from(e, coeffs(rx)));
+    EX ex(parse("b + 1/2"));
+
+    SDA_OP(add, +)
+    SDA_OP(sub, -)
+    SDA_OP(mul, *)
+    SDA_OP(div, /)
+    SECTION("neg and pow") {
+        sboth(o, SALLOC(mdac_sda_neg(a, r_)), SINTO(mdac_sda_neg_into(t_, a)), -ra);
+        sboth(o, SALLOC(mdac_sda_pow_i(a, 3, r_)), SINTO(mdac_sda_pow_i_into(t_, a, 3)), da::pow(ra, 3));
+        sboth(o, SALLOC(mdac_sda_pow_d(a, 0.3, r_)), SINTO(mdac_sda_pow_d_into(t_, a, 0.3)),
+              da::pow(ra, 0.3));
+        OK(mdac_sda_neg_into(a, a));
+        require_same(a, -ra);
+    }
+    SECTION("division by zero") {
+        S r;
+        REQUIRE(mdac_sda_div_d(a, 0.0, r.out()) == MDAC_ERR_VALUE);
+        REQUIRE(mdac_sda_div_d_into(o, a, 0.0) == MDAC_ERR_VALUE);
+    }
+}
+
+TEST_CASE("capi: SDA math functions equal C++", "[capi][sym][sda]") {
+    Envs envs;
+    mdac_env* e = envs.env;
+    const da::SDA ra = sref({"1/2 + a", "1", "b"});
+    S a(sfrom(e, {"1/2 + a", "1", "b"})), o(sfrom(e, {"7"}));
+#define SDA_FN(f) sboth(o, SALLOC(mdac_sda_##f(a, r_)), SINTO(mdac_sda_##f##_into(t_, a)), da::f(ra));
+    SDA_FN(sqrt) SDA_FN(exp) SDA_FN(log) SDA_FN(sin) SDA_FN(cos) SDA_FN(tan) SDA_FN(asin)
+    SDA_FN(acos) SDA_FN(atan) SDA_FN(sinh) SDA_FN(cosh) SDA_FN(tanh) SDA_FN(erf)
+#undef SDA_FN
+}
+
+TEST_CASE("capi: SDA simplify, expand, subs and evaluate equal C++", "[capi][sym][sda]") {
+    Envs envs;
+    mdac_env* e = envs.env;
+    const std::vector<const char*> cs = {"(a + 1)**2", "a*2/2 + b - b", "sin(a)**2"};
+    const da::SDA rs = sref(cs);
+    S s(sfrom(e, cs)), sp, ep, sb;
+    OK(mdac_sda_simplify(s, sp.out()));
+    da::SDA want = rs;
+    want.simplify();
+    require_same(sp, want);
+    OK(mdac_sda_expand(s, ep.out()));
+    REQUIRE(scoeffs(ep)[0] == str(SymEngine::expand(Expression(SymEngine::parse("(a + 1)**2")))));
+    require_same(s, rs);                                       // unchanged
+
+    EX a(parse("a")), b(parse("b")), two;
+    OK(mdac_expr_new_i(2, two.out()));
+    const mdac_expr* keys[] = {a};
+    const mdac_expr* vals[] = {two};
+    OK(mdac_sda_subs(s, 1, keys, vals, sb.out()));
+    REQUIRE(scoeffs(sb)[0] == "9");
+
+    const mdac_expr* ks[] = {a, b};
+    const double xs[] = {0.3, -1.25};
+    H r;
+    OK(mdac_sda_evaluate(s, 2, ks, xs, r.out()));
+    SymEngine::vec_basic syms = {SymEngine::symbol("a"), SymEngine::symbol("b")};
+    require_same(coeffs(r), coeffs(da::evaluate(rs, syms, {0.3, -1.25})));
+    H r2;
+    REQUIRE(mdac_sda_evaluate(s, 1, ks + 1, xs, r2.out()) == MDAC_ERR_VALUE);   // a has no value
+}
+
+TEST_CASE("capi: SDA lists and algorithms equal C++", "[capi][sym][sda][algo]") {
+    Envs envs;
+    mdac_env* e = envs.env;
+    da::SDA ra = sref(ca), rb = sref(cb);
+    S a(sfrom(e, ca)), b(sfrom(e, cb));
+
+    SECTION("lists") {
+        SL l;
+        OK(mdac_sdalist_new(l.out()));
+        REQUIRE(mdac_sdalist_length(l) == 0);
+        REQUIRE(mdac_sdalist_env(l) == nullptr);
+        OK(mdac_sdalist_push(l, a));
+        OK(mdac_sdalist_push(l, b));
+        REQUIRE(mdac_sdalist_length(l) == 2);
+        REQUIRE(mdac_sdalist_env(l) == e);
+        S g;
+        OK(mdac_sdalist_get(l, 1, g.out()));
+        require_same(g, rb);
+        OK(mdac_sdalist_set(l, 1, a));
+        S g2;
+        OK(mdac_sdalist_get(l, 1, g2.out()));
+        require_same(g2, ra);
+        S g3;
+        REQUIRE(mdac_sdalist_get(l, 2, g3.out()) == MDAC_ERR_INDEX);
+        const mdac_sda* vs[] = {a, b};
+        SL f;
+        OK(mdac_sdalist_from(vs, 2, f.out()));
+        REQUIRE(mdac_sdalist_length(f) == 2);
+    }
+    SECTION("der, integ and substitute") {
+        S r1, r2, r3, r4, r5, bad;
+        OK(mdac_sda_der(a, 0, r1.out()));
+        require_same(r1, da::da_der(ra, 0));
+        OK(mdac_sda_integ(a, 1, r2.out()));
+        require_same(r2, da::da_int(ra, 1));
+        REQUIRE(mdac_sda_der(a, kNvars, bad.out()) == MDAC_ERR_INDEX);
+        da::SDA w;
+        OK(mdac_sda_substitute_d(a, 0, 2.0, r3.out()));
+        da::da_substitute_const(ra, 0, 2.0, w);
+        require_same(r3, w);
+        OK(mdac_sda_substitute(a, 1, b, r4.out()));
+        da::da_substitute(ra, 1, rb, w);
+        require_same(r4, w);
+        const mdac_sda* vs[] = {b, a};
+        SL l;
+        OK(mdac_sdalist_from(vs, 2, l.out()));
+        const unsigned ids[] = {0, 2};
+        OK(mdac_sda_substitute_multi(a, ids, 2, l, r5.out()));
+        std::vector<unsigned> rids = {0, 2};
+        std::vector<da::SDA> rl = {rb, ra};
+        da::da_substitute(ra, rids, rl, w);
+        require_same(r5, w);
+        const unsigned dup[] = {1, 1};
+        REQUIRE(mdac_sda_substitute_multi(a, dup, 2, l, bad.out()) == MDAC_ERR_VALUE);
+
+        const mdac_sda* ms[] = {a, b};
+        SL m, o;
+        OK(mdac_sdalist_from(ms, 2, m.out()));
+        OK(mdac_sdalist_substitute(m, ids, 2, l, o.out()));
+        std::vector<da::SDA> rm = {ra, rb}, ro(2);
+        da::da_substitute(rm, rids, rl, ro);
+        for (size_t i = 0; i < 2; ++i) {
+            S g;
+            OK(mdac_sdalist_get(o, i, g.out()));
+            require_same(g, ro[i]);
+        }
+    }
+    SECTION("compose") {
+        const da::SDA rc = sref({"1/2", "a"});
+        S c(sfrom(e, {"1/2", "a"}));
+        const mdac_sda* ms[] = {a, b};
+        const mdac_sda* vs[] = {c, a, b};
+        SL m, v, o, v2;
+        OK(mdac_sdalist_from(ms, 2, m.out()));
+        OK(mdac_sdalist_from(vs, 3, v.out()));
+        OK(mdac_sdalist_compose(m, v, o.out()));
+        std::vector<da::SDA> rm = {ra, rb}, rv = {rc, ra, rb}, ro(2);
+        da::da_composition(rm, rv, ro);
+        for (size_t i = 0; i < 2; ++i) {
+            S g;
+            OK(mdac_sdalist_get(o, i, g.out()));
+            require_same(g, ro[i]);
+        }
+        OK(mdac_sdalist_from(vs, 2, v2.out()));
+        SL bad;
+        REQUIRE(mdac_sdalist_compose(m, v2, bad.out()) == MDAC_ERR_VALUE);
+
+        const double pt[] = {0.5, -1.0, 2.0};
+        mdac_expr* vals[2] = {nullptr, nullptr};
+        OK(mdac_sdalist_compose_d(m, pt, 3, vals));
+        std::vector<double> rpt(pt, pt + 3);
+        std::vector<Expression> rvals;
+        da::da_composition(rm, rpt, rvals);
+        for (size_t i = 0; i < 2; ++i) {
+            REQUIRE(str(vals[i]) == str(rvals[i]));
+            mdac_expr_free(vals[i]);
+        }
+        REQUIRE(mdac_sdalist_compose_d(m, pt, 2, vals) == MDAC_ERR_VALUE);
+    }
+}
+
+TEST_CASE("capi: SDA envs: mixing fails, freeing after mdac_clear is safe", "[capi][sym][sda]") {
+    mdac_sda* s = nullptr;
+    {
+        Envs envs;
+        OK(mdac_sda_var(envs.env, 0, &s));
+        mdac_env* other = nullptr;
+        OK(mdac_env_make(kOrder, kNvars, 50, 0, &other));
+        S t;
+        OK(mdac_sda_new_d(other, 1.0, t.out()));
+        H x;
+        OK(mdac_nda_new(other, 2.0, x.out()));
+        S r;
+        REQUIRE(mdac_sda_add(s, t, r.out()) == MDAC_ERR_ENV);
+        REQUIRE(mdac_sda_mul_n(s, x, r.out()) == MDAC_ERR_ENV);
+        REQUIRE(mdac_sda_add_into(t, s, s) == MDAC_ERR_ENV);
+        mdac_sda_free(t.p);
+        t.p = nullptr;
+        mdac_nda_free(x.p);
+        x.p = nullptr;
+        OK(mdac_env_close(other));
+    }
+    S r;
+    REQUIRE(mdac_sda_exp(s, r.out()) == MDAC_ERR_ENV);
+    mdac_sda_free(s);
+}
+
+// ---- T6.1 ------------------------------------------------------------------
+
+namespace {
+
+// Owns a C API CSDA.
+struct CS {
+    mdac_csda* p = nullptr;
+    CS() = default;
+    explicit CS(mdac_csda* q) : p(q) {}
+    CS(const CS&) = delete;
+    CS& operator=(const CS&) = delete;
+    ~CS() { mdac_csda_free(p); }
+    operator mdac_csda*() const { return p; }
+    mdac_csda** out() { return &p; }
+};
+
+// Owns a C API CSDA list.
+struct CSL {
+    mdac_csdalist* p = nullptr;
+    CSL() = default;
+    CSL(const CSL&) = delete;
+    CSL& operator=(const CSL&) = delete;
+    ~CSL() { mdac_csdalist_free(p); }
+    operator mdac_csdalist*() const { return p; }
+    mdac_csdalist** out() { return &p; }
+};
+
+using RCSDA = std::complex<da::SDA>;
+
+mdac_csda* csfrom(mdac_env* e, const std::vector<const char*>& re, const std::vector<const char*>& im) {
+    S r(sfrom(e, re)), i(sfrom(e, im));
+    mdac_csda* c = nullptr;
+    OK(mdac_csda_new(r, i, &c));
+    return c;
+}
+
+RCSDA csref(const std::vector<const char*>& re, const std::vector<const char*>& im) {
+    return RCSDA(sref(re), sref(im));
+}
+
+void require_same(const mdac_csda* c, const RCSDA& r) {
+    S re, im;
+    OK(mdac_csda_real(c, re.out()));
+    OK(mdac_csda_imag(c, im.out()));
+    require_same(re, get_real(r));
+    require_same(im, get_imag(r));
+}
+
+void require_same(const mdac_cnda* c, const da::CNDA& r, double tol) {
+    H re, im;
+    OK(mdac_cnda_real(c, re.out()));
+    OK(mdac_cnda_imag(c, im.out()));
+    std::vector<double> a = coeffs(re), b = coeffs(get_real(r)), x = coeffs(im), y = coeffs(get_imag(r));
+    a.resize(std::max(a.size(), b.size()));
+    b.resize(a.size());
+    x.resize(std::max(x.size(), y.size()));
+    y.resize(x.size());
+    for (size_t i = 0; i < a.size(); ++i) REQUIRE(a[i] == Approx(b[i]).margin(tol));
+    for (size_t i = 0; i < x.size(); ++i) REQUIRE(x[i] == Approx(y[i]).margin(tol));
+}
+
+// The allocating form and the _into form (into o, whose slots it keeps) both give want.
+template <class F, class G>
+void csboth(mdac_env* e, mdac_csda* o, F alloc, G into, const RCSDA& want) {
+    {
+        CS r;
+        OK(alloc(r.out()));
+        require_same(r, want);
+    }
+    const unsigned n = env_count(e);
+    OK(into(o));
+    REQUIRE(env_count(e) == n);
+    require_same(o, want);
+}
+
+#define CSALLOC(expr) [&](mdac_csda** r_) { return expr; }
+#define CSINTO(expr) [&](mdac_csda* t_) { return expr; }
+
+#define CSDA_OP(name, op)                                                                         \
+    SECTION(#name) {                                                                              \
+        csboth(e, o, CSALLOC(mdac_csda_##name(a, b, r_)), CSINTO(mdac_csda_##name##_into(t_, a, b)), ra op rb); \
+        csboth(e, o, CSALLOC(mdac_csda_##name##_s(a, s, r_)), CSINTO(mdac_csda_##name##_s_into(t_, a, s)), ra op rs); \
+        csboth(e, o, CSALLOC(mdac_csda_s##name(s, a, r_)), CSINTO(mdac_csda_s##name##_into(t_, s, a)), rs op ra); \
+        csboth(e, o, CSALLOC(mdac_csda_##name##_e(a, ex, r_)), CSINTO(mdac_csda_##name##_e_into(t_, a, ex)), ra op rex); \
+        csboth(e, o, CSALLOC(mdac_csda_e##name(ex, a, r_)), CSINTO(mdac_csda_e##name##_into(t_, ex, a)), rex op ra); \
+        csboth(e, o, CSALLOC(mdac_csda_##name##_d(a, d, r_)), CSINTO(mdac_csda_##name##_d_into(t_, a, d)), ra op d); \
+        csboth(e, o, CSALLOC(mdac_csda_d##name(d, a, r_)), CSINTO(mdac_csda_d##name##_into(t_, d, a)), d op ra); \
+        csboth(e, o, CSALLOC(mdac_csda_##name##_z(a, z.real(), z.imag(), r_)),                      \
+               CSINTO(mdac_csda_##name##_z_into(t_, a, z.real(), z.imag())), ra op z);           \
+        csboth(e, o, CSALLOC(mdac_csda_z##name(z.real(), z.imag(), a, r_)),                         \
+               CSINTO(mdac_csda_z##name##_into(t_, z.real(), z.imag(), a)), z op ra);            \
+        csboth(e, o, CSALLOC(mdac_sda_##name##_z(s, z.real(), z.imag(), r_)),                       \
+               CSINTO(mdac_sda_##name##_z_into(t_, s, z.real(), z.imag())), rs op z);            \
+        csboth(e, o, CSALLOC(mdac_sda_z##name(z.real(), z.imag(), s, r_)),                          \
+               CSINTO(mdac_sda_z##name##_into(t_, z.real(), z.imag(), s)), z op rs);             \
+        CS a1(csfrom(e, ca, cb)), b1(csfrom(e, cc, cd));                                          \
+        OK(mdac_csda_##name##_into(a1, a1, b));                                                   \
+        require_same(a1, ra op rb);                                                               \
+        OK(mdac_csda_##name##_into(b1, a, b1));                                                   \
+        require_same(b1, ra op rb);                                                               \
+    }
+
+const std::vector<const char*> cc = {"1/2 + b", "1", "a"};
+const std::vector<const char*> cd = {"1/4", "0", "2*b"};
+
+// The operator<< text of a CSDA without the line after "... part:", which
+// names the part's slot.
+std::string without_slot_lines(const std::string& text) {
+    std::istringstream is(text);
+    std::string line, out;
+    bool skip = false;
+    while (std::getline(is, line)) {
+        if (!skip) out += line + "\n";
+        skip = line.size() > 5 && line.compare(line.size() - 5, 5, "part:") == 0;
+    }
+    return out;
+}
+
+// Every element of the C list equals the C++ one.
+template <class L>
+void require_same(const mdac_csdalist* l, const L& r) {
+    REQUIRE(mdac_csdalist_length(l) == r.size());
+    for (size_t i = 0; i < r.size(); ++i) {
+        CS g;
+        OK(mdac_csdalist_get(l, i, g.out()));
+        require_same(g, r[i]);
+    }
+}
+
+} // namespace
+
+TEST_CASE("capi: CSDA lifecycle and parts", "[capi][sym][csda]") {
+    Envs envs;
+    mdac_env* e = envs.env;
+    const RCSDA ra = csref(ca, cb);
+    CS a(csfrom(e, ca, cb)), re_only, z, p, cp;
+    require_same(a, ra);
+    S sa(sfrom(e, ca));
+    OK(mdac_csda_new(sa, nullptr, re_only.out()));
+    require_same(re_only, RCSDA(sref(ca), da::SDA()));
+    OK(mdac_csda_new_z(e, 1.5, -2.0, z.out()));
+    require_same(z, RCSDA(da::SDA(1.5), da::SDA(-2.0)));
+
+    const da::CNDA rn(nda(1.5, 2.0), nda(-0.5, 1.0));
+    H nr(from(e, coeffs(get_real(rn)))), ni(from(e, coeffs(get_imag(rn))));
+    C n;
+    OK(mdac_cnda_new(nr, ni, n.out()));
+    OK(mdac_csda_promote(n, p.out()));
+    require_same(p, da::promote(rn));
+
+    OK(mdac_csda_copy(a, cp.out()));
+    REQUIRE(cp.p != a.p);
+    require_same(cp, ra);
+    REQUIRE(mdac_csda_env(a) == e);
+    S sb(sfrom(e, cb));
+    OK(mdac_csda_set_real(cp, sb));
+    OK(mdac_csda_set_imag(cp, sa));
+    require_same(cp, RCSDA(sref(cb), sref(ca)));
+    require_same(a, ra);                                       // the copy was independent
+
+    // The operator<< text; the first line of each part's table names its slot.
+    size_t len = 0;
+    OK(mdac_csda_to_string(a, nullptr, 0, &len));
+    std::string text(len, '\0');
+    OK(mdac_csda_to_string(a, text.data(), len, &len));
+    text.resize(len - 1);
+    std::ostringstream os;
+    os << ra;
+    REQUIRE(text.find("Imaginary part") != std::string::npos);
+    REQUIRE(without_slot_lines(text) == without_slot_lines(os.str()));
+    char small[5];
+    OK(mdac_csda_to_string(a, small, sizeof small, &len));
+    REQUIRE(std::string(small) == text.substr(0, 4));
+}
+
+TEST_CASE("capi: CSDA arithmetic equals C++", "[capi][sym][csda]") {
+    Envs envs(400);
+    mdac_env* e = envs.env;
+    const RCSDA ra = csref(ca, cb), rb = csref(cc, cd);
+    const da::SDA rs = sref({"1/3 + a", "b"});
+    const Expression rex = SymEngine::parse("b + 1/2");
+    const double d = 1.25;
+    const std::complex<double> z(0.5, -2.0);
+    CS a(csfrom(e, ca, cb)), b(csfrom(e, cc, cd)), o(csfrom(e, {"7"}, {"1"}));
+    S s(sfrom(e, {"1/3 + a", "b"}));
+    EX ex(parse("b + 1/2"));
+
+    CSDA_OP(add, +)
+    CSDA_OP(sub, -)
+    CSDA_OP(mul, *)
+    CSDA_OP(div, /)
+    SECTION("neg") {
+        csboth(e, o, CSALLOC(mdac_csda_neg(a, r_)), CSINTO(mdac_csda_neg_into(t_, a)), -ra);
+        OK(mdac_csda_neg_into(a, a));
+        require_same(a, -ra);
+    }
+    SECTION("division by zero") {
+        CS r;
+        REQUIRE(mdac_csda_div_d(a, 0.0, r.out()) == MDAC_ERR_VALUE);
+        REQUIRE(mdac_csda_div_d_into(o, a, 0.0) == MDAC_ERR_VALUE);
+    }
+}
+
+TEST_CASE("capi: CSDA math functions, abs and evaluate equal C++", "[capi][sym][csda]") {
+    Envs envs(400);
+    mdac_env* e = envs.env;
+    // Numeric constant parts keep the symbolic series small.
+    const std::vector<const char*> re = {"1/2", "a"}, im = {"1/3", "0", "b"};
+    const RCSDA ra = csref(re, im);
+    CS a(csfrom(e, re, im)), o(csfrom(e, {"7"}, {"1"}));
+#define CSDA_FN(f) csboth(e, o, CSALLOC(mdac_csda_##f(a, r_)), CSINTO(mdac_csda_##f##_into(t_, a)), da::f(ra));
+    CSDA_FN(sqrt) CSDA_FN(exp) CSDA_FN(log) CSDA_FN(asin) CSDA_FN(acos) CSDA_FN(atan)
+    CSDA_FN(asinh) CSDA_FN(acosh) CSDA_FN(atanh)
+#undef CSDA_FN
+    csboth(e, o, CSALLOC(mdac_csda_pow_i(a, 3, r_)), CSINTO(mdac_csda_pow_i_into(t_, a, 3)),
+           da::pow(ra, 3));
+    csboth(e, o, CSALLOC(mdac_csda_pow_d(a, 0.5, r_)), CSINTO(mdac_csda_pow_d_into(t_, a, 0.5)),
+           da::pow(ra, 0.5));
+    S ab;
+    OK(mdac_csda_abs(a, ab.out()));
+    require_same(ab, da::abs(ra));
+
+    EX sa(parse("a")), sb(parse("b"));
+    const mdac_expr* ks[] = {sa, sb};
+    const double xs[] = {0.3, -1.25};
+    C r;
+    OK(mdac_csda_evaluate(a, 2, ks, xs, r.out()));
+    SymEngine::vec_basic syms = {SymEngine::symbol("a"), SymEngine::symbol("b")};
+    require_same(r, da::evaluate(ra, syms, {0.3, -1.25}), 0.0);
+    C r2;
+    REQUIRE(mdac_csda_evaluate(a, 1, ks + 1, xs, r2.out()) == MDAC_ERR_VALUE);   // a has no value
+    REQUIRE(r2.p == nullptr);
+}
+
+TEST_CASE("capi: CSDA lists and cd_composition equal C++", "[capi][sym][csda][algo]") {
+    Envs envs(400);
+    mdac_env* e = envs.env;
+    const RCSDA ra = csref(ca, cb), rb = csref(cc, cd);
+    CS a(csfrom(e, ca, cb)), b(csfrom(e, cc, cd));
+
+    SECTION("lists") {
+        CSL l;
+        OK(mdac_csdalist_new(l.out()));
+        REQUIRE(mdac_csdalist_length(l) == 0);
+        REQUIRE(mdac_csdalist_env(l) == nullptr);
+        OK(mdac_csdalist_push(l, a));
+        OK(mdac_csdalist_push(l, b));
+        REQUIRE(mdac_csdalist_env(l) == e);
+        require_same(l, std::vector<RCSDA>{ra, rb});
+        OK(mdac_csdalist_set(l, 1, a));
+        require_same(l, std::vector<RCSDA>{ra, ra});
+        CS g;
+        REQUIRE(mdac_csdalist_get(l, 2, g.out()) == MDAC_ERR_INDEX);
+        REQUIRE(mdac_csdalist_set(l, 2, a) == MDAC_ERR_INDEX);
+        const mdac_csda* vs[] = {b, a};
+        CSL f;
+        OK(mdac_csdalist_from(vs, 2, f.out()));
+        require_same(f, std::vector<RCSDA>{rb, ra});
+    }
+    SECTION("cd_composition, three forms") {
+        // Arguments: a constant plus a small linear part per variable.
+        const std::vector<const char*> v0r = {"7/10", "1/10"}, v0i = {"0", "1/20"};
+        const std::vector<const char*> v1r = {"3/10", "0", "1/20"}, v1i = {"1/50"};
+        const std::vector<const char*> v2r = {"1/5", "0", "0", "0", "1/10"}, v2i = {"0"};
+        const RCSDA rv0 = csref(v0r, v0i), rv1 = csref(v1r, v1i), rv2 = csref(v2r, v2i);
+        CS v0(csfrom(e, v0r, v0i)), v1(csfrom(e, v1r, v1i)), v2(csfrom(e, v2r, v2i));
+        const mdac_csda* cv[] = {v0, v1, v2};
+        const mdac_csda* cm[] = {a, b};
+        CSL lv, lm, o1, o2;
+        OK(mdac_csdalist_from(cv, 3, lv.out()));
+        OK(mdac_csdalist_from(cm, 2, lm.out()));
+        std::vector<RCSDA> rv = {rv0, rv1, rv2}, rm = {ra, rb};
+
+        OK(mdac_csdalist_compose(lm, lv, o1.out()));
+        std::vector<RCSDA> want(2);
+        da::cd_composition(rm, rv, want);
+        require_same(o1, want);
+
+        S s0(sfrom(e, ca)), s1(sfrom(e, cc));
+        const mdac_sda* sm[] = {s0, s1};
+        SL lsm;
+        OK(mdac_sdalist_from(sm, 2, lsm.out()));
+        std::vector<da::SDA> rsm = {sref(ca), sref(cc)};
+        OK(mdac_sdalist_compose_c(lsm, lv, o2.out()));
+        std::vector<RCSDA> want2(2);
+        da::cd_composition(rsm, rv, want2);
+        require_same(o2, want2);
+
+        S w0(sfrom(e, v0r)), w1(sfrom(e, v1r)), w2(sfrom(e, v2r));
+        const mdac_sda* sv[] = {w0, w1, w2};
+        SL lsv;
+        CSL o3;
+        OK(mdac_sdalist_from(sv, 3, lsv.out()));
+        std::vector<da::SDA> rsv = {sref(v0r), sref(v1r), sref(v2r)};
+        OK(mdac_csdalist_compose_s(lm, lsv, o3.out()));
+        std::vector<RCSDA> want3(2);
+        da::cd_composition(rm, rsv, want3);
+        require_same(o3, want3);
+
+        CSL bad, empty, oe;
+        OK(mdac_csdalist_from(cv, 2, bad.out()));
+        CSL ob;
+        REQUIRE(mdac_csdalist_compose(lm, bad, ob.out()) == MDAC_ERR_VALUE);
+        REQUIRE(ob.p == nullptr);
+        OK(mdac_csdalist_new(empty.out()));
+        OK(mdac_csdalist_compose(empty, lv, oe.out()));
+        REQUIRE(mdac_csdalist_length(oe) == 0);
+    }
+}
+
+TEST_CASE("capi: CSDA envs: mixing fails, freeing after mdac_clear is safe", "[capi][sym][csda]") {
+    mdac_csda* c = nullptr;
+    mdac_csdalist* l = nullptr;
+    {
+        Envs envs;
+        OK(mdac_csda_new_z(envs.env, 1.0, 2.0, &c));
+        OK(mdac_csdalist_new(&l));
+        OK(mdac_csdalist_push(l, c));
+        mdac_env* other = nullptr;
+        OK(mdac_env_make(kOrder, kNvars, 50, 0, &other));
+        CS t;
+        OK(mdac_csda_new_z(other, 1.0, 0.0, t.out()));
+        S s;
+        OK(mdac_sda_new_d(other, 2.0, s.out()));
+        S s2;
+        OK(mdac_sda_new_d(envs.env, 2.0, s2.out()));
+        CS r;
+        REQUIRE(mdac_csda_add(c, t, r.out()) == MDAC_ERR_ENV);
+        REQUIRE(mdac_csda_mul_s(c, s, r.out()) == MDAC_ERR_ENV);
+        REQUIRE(mdac_csda_add_into(t, c, c) == MDAC_ERR_ENV);
+        REQUIRE(mdac_csda_new(s2, s, r.out()) == MDAC_ERR_ENV);
+        REQUIRE(mdac_csda_set_real(c, s) == MDAC_ERR_ENV);
+        REQUIRE(mdac_csdalist_push(l, t) == MDAC_ERR_ENV);
+        mdac_csda_free(t.p);
+        t.p = nullptr;
+        mdac_sda_free(s.p);
+        s.p = nullptr;
+        OK(mdac_env_close(other));
+    }
+    CS r;
+    REQUIRE(mdac_csda_exp(c, r.out()) == MDAC_ERR_ENV);
+    mdac_csda_free(c);
+    mdac_csdalist_free(l);
+}
+
+TEST_CASE("capi: import of SDA and CSDA, promote_to", "[capi][sym][multienv]") {
+    Envs envs;
+    mdac_env *b = nullptr, *small = nullptr;
+    OK(mdac_env_make(kOrder, kNvars, 20, 0, &b));
+    OK(mdac_env_make(2, 2, 20, 0, &small));
+    H x(from(envs.env, input(1.5, 0.7)));
+    S p, ref;
+    OK(mdac_nda_promote_to(b, x, p.out()));
+    OK(mdac_sda_promote(x, ref.out()));
+    REQUIRE(mdac_sda_env(p) == b);
+    mdac_env* cur = nullptr;
+    OK(mdac_env_current(&cur));
+    REQUIRE(cur == envs.env);
+    REQUIRE(scoeffs(p) == scoeffs(ref));
+    S q;
+    OK(mdac_sda_import(envs.env, p, q.out()));
+    REQUIRE(mdac_sda_env(q) == envs.env);
+    REQUIRE(scoeffs(q) == scoeffs(ref));
+
+    CS c, cb;
+    OK(mdac_csda_new(q, ref, c.out()));
+    OK(mdac_csda_import(b, c, cb.out()));
+    REQUIRE(mdac_csda_env(cb) == b);
+    S re, im;
+    OK(mdac_csda_real(cb, re.out()));
+    OK(mdac_csda_imag(cb, im.out()));
+    REQUIRE(scoeffs(re) == scoeffs(ref));
+    REQUIRE(scoeffs(im) == scoeffs(ref));
+
+    S bad;
+    REQUIRE(mdac_nda_promote_to(small, x, bad.out()) == MDAC_ERR_VALUE);
+    REQUIRE(mdac_sda_import(small, q, bad.out()) == MDAC_ERR_VALUE);
+    CS cbad;
+    REQUIRE(mdac_csda_import(small, c, cbad.out()) == MDAC_ERR_VALUE);
+    mdac_sda_free(p.p);
+    p.p = nullptr;
+    mdac_sda_free(re.p);
+    re.p = nullptr;
+    mdac_sda_free(im.p);
+    im.p = nullptr;
+    mdac_csda_free(cb.p);
+    cb.p = nullptr;
+    OK(mdac_env_close(b));
+    REQUIRE(mdac_nda_promote_to(b, x, bad.out()) == MDAC_ERR_ENV);
+    REQUIRE(mdac_sda_import(b, q, bad.out()) == MDAC_ERR_ENV);
+    REQUIRE(mdac_csda_import(b, c, cbad.out()) == MDAC_ERR_ENV);
+    OK(mdac_env_close(small));
+}
+
+#endif // DA_WITH_SYMBOLIC
