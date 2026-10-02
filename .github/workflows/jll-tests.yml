@@ -89,7 +89,8 @@ jobs:
                   "name = \"MiraDAC_jll\"\nuuid = \"$uuid\"\nversion = \"$(project["version"])+0\"\n" *
                   "[deps]\nGMP_jll = \"781609d7-10c4-51f6-84f2-b8444358ff6d\"\n")
             write(joinpath(jll, "src", "MiraDAC_jll.jl"),
-                  "module MiraDAC_jll\nusing GMP_jll\nconst libmiradac_c = $(repr(only(libs)))\nend\n")
+                  "module MiraDAC_jll\nusing GMP_jll\nis_available() = true\n" *
+                  "const libmiradac_c = $(repr(only(libs)))\nend\n")
             Pkg.develop(path=jll)
             Pkg.instantiate()
             Pkg.test("MiraDAC")
