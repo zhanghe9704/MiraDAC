@@ -559,6 +559,11 @@ cmake --build build --target benchmark_composition -j4
 The benchmark composes one DA vector of 6 bases with 6 DA vectors at orders 2, 4, 6 (and optionally 8, 10),
 reporting time for both the MiraDAC engine and the reference `ref/tpsa` engine side by side.
 
+## Acknowledgement
+
+This work is supported by the U.S. Department of Energy, Office of Science, Office of Nuclear
+Physics under contract DE-AC05-06OR23177 and contract No. 89243126CSC000213.
+
 ## License
 
 MIT — see `LICENSE`.
