@@ -205,10 +205,15 @@ std::ostream& operator<<(std::ostream& os, const DAVector<SymEngine::Expression>
     std::string sep(static_cast<std::size_t>(cnt_width), '-');
     start[start.size() - 1] = 'I';
 
-    os << start;
-    os << "          V [" << v.slot_ << "]              Base  [ "
+    // Unlike NDA (a fixed-width number, and a format read back by
+    // read_da_from_file), a coefficient here is an expression of any length,
+    // so it comes last: counter, base exponents, index, coefficient.
+    const int base_width = static_cast<int>(gnv) * width_base;
+    os << start << ' ' << std::left << std::setw(base_width) << "Base" << std::right
+       << std::setw(6) << "Index" << "    V [" << v.slot_ << "]  [ "
        << l << " / " << full_len << " ]" << std::endl
-       << sep << "----------------------------------------------" << std::endl;
+       << sep << std::string(static_cast<std::size_t>(base_width) + 7, '-')
+       << "----------------------------------------------" << std::endl;
 
     int cnt = 0;
     const unsigned* p = bptr;
@@ -222,14 +227,13 @@ std::ostream& operator<<(std::ostream& os, const DAVector<SymEngine::Expression>
         ++cnt;
         std::ostringstream ss;
         ss << vals[i];
-        os << std::setw(cnt_width) << cnt;
-        os << ' ' << std::setw(32) << ss.str() << "    ";
+        os << std::setw(cnt_width) << cnt << ' ';
         for (unsigned j = 0; j < gnv - 1; ++j) {
             os << std::setw(width_base) << static_cast<unsigned>(*p - *(p + 1));
             ++p;
         }
         os << std::setw(width_base) << static_cast<unsigned>(*p++) << std::setw(6) << i
-           << std::endl;
+           << "    " << ss.str() << std::endl;
     }
     os << std::endl;
     return os;

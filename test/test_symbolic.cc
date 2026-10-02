@@ -18,6 +18,7 @@
 #include <array>
 #include <cmath>
 #include <vector>
+#include <sstream>
 #include <iomanip>
 #include <iostream>
 
@@ -598,6 +599,35 @@ TEST_CASE("SDA erf works in a non-default env", "[symbolic][multienv]") {
 
     da::da_select_env(*main_env);
     da::da_destroy_env(env2);
+    da::da_clear();
+}
+
+// ===========================================================================
+// SDA printing: the base exponents come before the coefficient, which can
+// be an expression of any length (NDA keeps its file format).
+// ===========================================================================
+TEST_CASE("SDA print puts the bases before the coefficient", "[symbolic]") {
+    da::da_init(3u, 2u, 100u);
+    {
+        Expression a("alpha_with_a_long_name");
+        SDA s = a * da::promote(da::base[1]);
+        std::ostringstream os;
+        os << s;
+        std::istringstream lines(os.str());
+        std::string line, row;
+        while (std::getline(lines, line))
+            if (line.find("alpha_with_a_long_name") != std::string::npos) row = line;
+        REQUIRE_FALSE(row.empty());
+        // The row is: counter, exponents of x1 x2, index, coefficient.
+        std::istringstream cols(row);
+        std::string cnt, e1, e2, idx, coeff;
+        cols >> cnt >> e1 >> e2 >> idx >> coeff;
+        REQUIRE(cnt == "1");
+        REQUIRE(e1 == "0");
+        REQUIRE(e2 == "1");
+        REQUIRE(idx == "2");
+        REQUIRE(coeff == "alpha_with_a_long_name");
+    }
     da::da_clear();
 }
 
