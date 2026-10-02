@@ -46,24 +46,21 @@ function(mdac_library name)
         # generated from the compiled objects: everything else — daStatic
         # internals, std:: template instantiations, and in the JLL build the
         # statically linked SymEngine — stays hidden, as `local: *` does on
-        # GNU ld. The POST_BUILD command below uses $<TARGET_OBJECTS:...>,
-        # which CMake supports in TARGET build events only from 3.21.
-        if(CMAKE_VERSION VERSION_LESS 3.21)
-            message(FATAL_ERROR
-                "capi: building miradac_c for APPLE requires CMake >= 3.21 "
-                "(the export list is generated from the object files with "
-                "a target-dependent generator expression)")
-        endif()
+        # GNU ld. (The sources are an OBJECT library precisely so their
+        # .o files can be listed here; $<TARGET_OBJECTS:...> is valid in
+        # add_custom_command COMMAND since CMake 3.12.)
         set(_exports "${CMAKE_CURRENT_BINARY_DIR}/exports.${name}.darwin")
-        add_custom_command(TARGET ${name}_objs POST_BUILD
-            BYPRODUCTS "${_exports}"
+        add_custom_command(OUTPUT "${_exports}"
             COMMAND ${CMAKE_COMMAND}
                     -DNM=${MDAC_NM}
                     "-DOBJS=$<TARGET_OBJECTS:${name}_objs>"
                     -DOUT=${_exports}
                     -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/gen_export_list.cmake
+            DEPENDS ${name}_objs
             COMMENT "mdac: generating ${_exports}"
             VERBATIM)
+        add_custom_target(${name}_exports DEPENDS "${_exports}")
+        add_dependencies(${name} ${name}_exports)
         target_link_options(${name} PRIVATE
             -Wl,-exported_symbols_list,${_exports})
         set_property(TARGET ${name} APPEND PROPERTY LINK_DEPENDS ${_exports})
