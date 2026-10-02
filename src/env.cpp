@@ -8,6 +8,7 @@
 #include <memory>
 #include <vector>
 #include <stdexcept>
+#include <utility>   // std::move
 
 namespace da {
 
