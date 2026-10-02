@@ -1,0 +1,96 @@
+name: JLL runtime tests
+
+# Dispatch with the run ID of a workflow in this repository that uploaded
+# MiraDAC.v<version>.<platform>.tar.gz files as Actions artifacts.
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Actions run ID containing the BinaryBuilder tarballs"
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / Julia ${{ matrix.julia }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, ubuntu-24.04-arm, macos-14, macos-13, windows-latest ]
+        julia: [ "1.10", "1" ]
+        include:
+          - { os: ubuntu-latest, triplet: x86_64-linux-gnu }
+          - { os: ubuntu-24.04-arm, triplet: aarch64-linux-gnu }
+          - { os: macos-14, triplet: aarch64-apple-darwin }
+          - { os: macos-13, triplet: x86_64-apple-darwin }
+          - { os: windows-latest, triplet: x86_64-w64-mingw32 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/tarballs
+          merge-multiple: true
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ matrix.julia }}
+
+      - name: Select and unpack tarball
+        id: tarball
+        env:
+          TRIPLET: ${{ matrix.triplet }}
+        run: |
+          temp="$RUNNER_TEMP"
+          if [[ "$RUNNER_OS" == Windows ]]; then temp="$(cygpath -u "$temp")"; fi
+          mapfile -d '' files < <(find "$temp/tarballs" -type f \
+            -name "MiraDAC.v*.$TRIPLET*.tar.gz" -print0)
+          if (( ${#files[@]} == 0 )); then
+            echo "SKIP: no MiraDAC tarball for $TRIPLET in run ${{ inputs.run_id }}"
+            exit 0
+          fi
+          if (( ${#files[@]} != 1 )); then
+            printf 'Expected one tarball for %s, found:\n%s\n' "$TRIPLET" "${files[*]}" >&2
+            exit 1
+          fi
+          mkdir -p "$temp/miradac-artifact"
+          tar -xzf "${files[0]}" -C "$temp/miradac-artifact"
+          echo "Selected ${files[0]}"
+          echo "present=true" >> "$GITHUB_OUTPUT"
+
+      - name: Test MiraDAC with local JLL
+        if: steps.tarball.outputs.present == 'true'
+        run: |
+          # A local JLL avoids depending on a not-yet-registered JLL or its
+          # artifact hash; the real tarball is still loaded and ABI-tested.
+          julia --project=julia/MiraDAC --startup-file=no -e '
+            using Pkg
+            root = joinpath(ENV["RUNNER_TEMP"], "miradac-artifact")
+            names = Sys.iswindows() ? ("libmiradac_c.dll",) :
+                    Sys.isapple() ? ("libmiradac_c.dylib",) : ("libmiradac_c.so",)
+            libs = [joinpath(dir, name) for (dir, _, files) in walkdir(root)
+                    for name in files if name in names]
+            length(libs) == 1 || error("Expected one C API library in $root, found $(libs)")
+            project = Pkg.TOML.parsefile("julia/MiraDAC/Project.toml")
+            uuid = get(project["deps"], "MiraDAC_jll", nothing)
+            uuid === nothing && error("MiraDAC must depend on MiraDAC_jll; merge the JLL fallback first")
+            jll = joinpath(ENV["RUNNER_TEMP"], "MiraDAC_jll")
+            mkpath(joinpath(jll, "src"))
+            write(joinpath(jll, "Project.toml"),
+                  "name = \"MiraDAC_jll\"\nuuid = \"$uuid\"\nversion = \"$(project["version"])+0\"\n" *
+                  "[deps]\nGMP_jll = \"781609d7-10c4-51f6-84f2-b8444358ff6d\"\n")
+            write(joinpath(jll, "src", "MiraDAC_jll.jl"),
+                  "module MiraDAC_jll\nusing GMP_jll\nconst libmiradac_c = $(repr(only(libs)))\nend\n")
+            Pkg.develop(path=jll)
+            Pkg.instantiate()
+            Pkg.test("MiraDAC")
+          '
