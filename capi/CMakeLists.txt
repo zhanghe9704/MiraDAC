@@ -4,11 +4,19 @@ enable_language(C)
 
 file(GLOB MDAC_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
 
-# Symbol-list generator inputs: nm, preferred as llvm-nm (format-agnostic, so
-# it reads Mach-O objects when cross-building for Apple platforms).
-find_program(MDAC_NM NAMES llvm-nm nm)
+# Symbol-list generator inputs: nm, preferring the cross toolchain's own
+# target-prefixed nm, then llvm-nm (format-agnostic, so it reads Mach-O
+# objects), then any nm on PATH (BinaryBuilder's host binutils nm reads all
+# the object formats involved).
+get_filename_component(MDAC_CC_NAME "${CMAKE_C_COMPILER}" NAME)
+set(MDAC_NM_NAMES llvm-nm nm)
+if(MDAC_CC_NAME MATCHES "-gcc")
+    string(REGEX REPLACE "-gcc[^-]*$" "-nm" MDAC_TARGET_NM_NAME "${MDAC_CC_NAME}")
+    set(MDAC_NM_NAMES "${MDAC_TARGET_NM_NAME}" ${MDAC_NM_NAMES})
+endif()
+find_program(MDAC_NM NAMES ${MDAC_NM_NAMES})
 if(NOT MDAC_NM)
-    message(FATAL_ERROR "capi: nm not found (needed to generate the Apple export list)")
+    message(FATAL_ERROR "capi: nm not found (needed to generate the export list)")
 endif()
 
 function(mdac_library name)
@@ -63,6 +71,31 @@ function(mdac_library name)
         add_dependencies(${name} ${name}_exports)
         target_link_options(${name} PRIVATE
             -Wl,-exported_symbols_list,${_exports})
+        set_property(TARGET ${name} APPEND PROPERTY LINK_DEPENDS ${_exports})
+    elseif(WIN32)
+        # MinGW ld ignores the ELF options (or, worse, accepts the version
+        # script silently with no effect, falling back to PE's
+        # export-everything). On PE the counterpart of `global: mdac_*;
+        # local: *` is a .def file: passing one switches the DLL to exporting
+        # exactly the listed names — daStatic internals, std:: template
+        # instantiations, and in the JLL build the statically linked SymEngine
+        # stay hidden. The list is generated from the compiled objects, as on
+        # Apple, for the same reason.
+        set(_exports "${CMAKE_CURRENT_BINARY_DIR}/exports.${name}.mingw.def")
+        add_custom_command(OUTPUT "${_exports}"
+            COMMAND ${CMAKE_COMMAND}
+                    -DNM=${MDAC_NM}
+                    -DNM_FLAGS=--defined-only
+                    "-DOBJS=$<TARGET_OBJECTS:${name}_objs>"
+                    -DOUT=${_exports}
+                    -DDEF_FILE=1
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/gen_export_list.cmake
+            DEPENDS ${name}_objs
+            COMMENT "mdac: generating ${_exports}"
+            VERBATIM)
+        add_custom_target(${name}_exports DEPENDS "${_exports}")
+        add_dependencies(${name} ${name}_exports)
+        target_link_options(${name} PRIVATE "${_exports}")
         set_property(TARGET ${name} APPEND PROPERTY LINK_DEPENDS ${_exports})
     else()
         target_link_options(${name} PRIVATE -Wl,--exclude-libs,ALL
