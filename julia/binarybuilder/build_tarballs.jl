@@ -72,15 +72,29 @@ install -Dvm 755 build-miradac/capi/libmiradac_c.${dlext} ${libdir}/libmiradac_c
 install -Dvm 644 MiraDAC/capi/include/miradac.h ${includedir}/miradac.h
 install_license MiraDAC/LICENSE
 
-# Only mdac_* (plus toolchain symbols such as _init/_fini) may be exported.
-LEAK=$(nm -D --defined-only ${libdir}/libmiradac_c.${dlext} | awk '{print $3}' \
-       | grep -v -E '^(mdac_|_init$|_fini$|_edata$|_end$|__bss_start$)' || true)
+# Only mdac_* (plus toolchain symbols such as _init/_fini) may be exported. The check is
+# per-object format: -D is ELF-only and cctools nm (the darwin one) has no --defined-only,
+# while -gU (external, defined) works there; Mach-O symbols also carry a leading underscore.
+if [ "${dlext}" = "dylib" ]; then
+    LEAK=$(nm -gU ${libdir}/libmiradac_c.${dlext} | awk '{print $NF}' \
+           | grep -v -E '^_mdac_' || true)
+else
+    LEAK=$(nm -D --defined-only ${libdir}/libmiradac_c.${dlext} | awk '{print $3}' \
+           | grep -v -E '^(mdac_|_init$|_fini$|_edata$|_end$|__bss_start$)' || true)
+fi
 [ -z "${LEAK}" ] || { echo "libmiradac_c exports non-mdac symbols:"; echo "${LEAK}"; exit 1; }
 """
 
-# x86_64-linux-gnu first (T9.1); the other platforms come later. BinaryBuilderBase >= 1.x expands
-# to the cxx11 string ABI only (cxx03 needs `old_abis=true`), so this is x86_64-linux-gnu-cxx11.
-platforms = expand_cxxstring_abis(Platform("x86_64", "linux"; libc="glibc"))
+# x86_64-linux-gnu first (T9.1), then the Apple platforms. BinaryBuilderBase >= 1.x expands
+# to the cxx11 string ABI only (cxx03 needs `old_abis=true`), so this is x86_64-linux-gnu-cxx11;
+# the macOS platforms use libc++ and have no cxxstring ABI to expand. Building for macOS needs
+# capi/CMakeLists.txt from after "capi: choose the exported-symbol mechanism per linker" — the
+# GitSource commit below must include it (or a later release tag) for the darwin leg to link.
+platforms = vcat(
+    expand_cxxstring_abis(Platform("x86_64", "linux"; libc="glibc")),
+    Platform("aarch64", "macos"),
+    Platform("x86_64", "macos"),
+)
 
 products = [
     LibraryProduct("libmiradac_c", :libmiradac_c),
