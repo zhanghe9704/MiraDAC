@@ -97,6 +97,12 @@ function(mdac_library name)
         add_dependencies(${name} ${name}_exports)
         target_link_options(${name} PRIVATE "${_exports}")
         set_property(TARGET ${name} APPEND PROPERTY LINK_DEPENDS ${_exports})
+        # A DLL for external consumers must be self-contained: nothing C++
+        # crosses the C ABI, so every non-system library is linked in
+        # statically (-static covers libgcc/libstdc++ and libwinpthread,
+        # which the emutls behind thread_local pulls in) and the imports
+        # stay system-only. -static-libgcc alone leaves winpthread dynamic.
+        target_link_options(${name} PRIVATE -static)
     else()
         target_link_options(${name} PRIVATE -Wl,--exclude-libs,ALL
             -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/src/exports.map)
