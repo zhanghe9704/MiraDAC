@@ -23,6 +23,8 @@
 #include <limits>
 #include <cmath>
 #include <stdexcept>
+#include <algorithm> // std::min
+#include <utility>   // std::swap
 
 #ifdef DA_WITH_SYMBOLIC
 #  include "da/symbolic_ops.h"

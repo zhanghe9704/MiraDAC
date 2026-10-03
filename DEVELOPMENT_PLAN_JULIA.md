@@ -1011,6 +1011,68 @@ with the pinned SymEngine linked statically with hidden symbols (the T5.6 fallba
 any case, because a JLL must not clash with `SymEngine_jll`) and GMP from `GMP_jll`. Platforms:
 `x86_64-linux-gnu` first, then those of `supported_platforms()` that build. Run locally with
 BinaryBuilder.jl (Docker) and test the tarball with the Julia suite.
+- *As built (first step, x86_64-linux-gnu, 2026-10-02):* `julia/binarybuilder/build_tarballs.jl`
+  (`MiraDAC` 1.1.0) and `julia/binarybuilder/README.md` (the commands). Sources: the v1.1.0 commit
+  `f32dc07` and the pinned SymEngine commit as a `GitSource`. An `ArchiveSource` of the pin's tarball
+  is refused by BinaryBuilderBase: it is GitHub's automatic archive, whose checksum GitHub does not
+  guarantee. The script checks the GitSource commit against the pin file of the checked-out MiraDAC.
+  SymEngine is built with the pin's options but `BUILD_SHARED_LIBS=OFF`, and PIC, into
+  `srcdir/symengine-static` (not `${prefix}`). MiraDAC is configured with
+  `-DDA_BUILD_CAPI=ON -DDA_BUILD_TESTS=OFF -DDA_BUILD_EXAMPLES=OFF -DWITH_SYMBOLIC=ON`, and only
+  target `miradac_c` is built. The stamp is written truthfully (`BUILD_SHARED_LIBS=OFF`), so the
+  pin check cannot pass: `DA_IGNORE_SYMENGINE_PIN=ON` turns that into a warning, and the warning
+  names only `stamp does not have BUILD_SHARED_LIBS=ON`. A stamp claiming `ON` would be false. This
+  library never meets symengine.py, so the shared-library part of the pin does not apply.
+  `-DCMAKE_SKIP_BUILD_RPATH=ON`: the build-tree binary is shipped, and without this it carried
+  `RUNPATH /usr/local/lib`; the audit sets `$ORIGIN`. The script fails if `nm -D --defined-only`
+  shows anything but `mdac_*` and toolchain symbols. Result: 561 `mdac_*` exports and nothing else,
+  no SymEngine symbol in the dynamic table (it is linked in), `NEEDED` libgmp.so.10 plus the C/C++
+  runtime, and `RUNPATH $ORIGIN`. `GMP_jll` dependency: build against 6.2.1, compat `6.2.1` (Julia
+  1.10's stdlib GMP_jll is 6.2.1; 1.11+ ship 6.3.0, the same `libgmp.so.10`). `julia_compat="1.10"`,
+  GCC 10.
+  - Tools: Julia 1.13.1 (BinaryBuilder runs on it, no other Julia needed), BinaryBuilder 0.6.6,
+    BinaryBuilderBase 1.44.0. Runner: `BINARYBUILDER_RUNNER=userns`. The Docker runner built too,
+    but it runs `sudo chown` on the build directory after each step, which fails without a terminal
+    or passwordless sudo. `expand_cxxstring_abis` now yields only `x86_64-linux-gnu-cxx11` (cxx03
+    needs `old_abis=true`), so one tarball (tree hash `9834a1bc…`); the build takes about 5 min.
+    `--deploy=local` writes the JLL to the first depot's `dev/MiraDAC_jll` (`JULIA_PKG_DEVDIR` is
+    ignored), with a `file://` artifact URL.
+  - Julia package: `MiraDAC_jll` is in `[deps]` (compat `1.1`). `libmiradac` is the preference
+    when set, else `MiraDAC_jll.libmiradac_c` (the soname constant, which the JLL's `__init__`
+    has dlopened by full path), else `""` (the platform has no JLL build), which `__init__` reports.
+    The ABI check is unchanged. `runtests.jl` logs the loaded library's path. Until T9.2,
+    `MiraDAC_jll` is unregistered, so every environment needs `Pkg.develop` of the local JLL:
+    `dev_setup.jl` does it for `julia/MiraDAC`, `bench` and `docs` when `MIRADAC_JLL` is set. On
+    Julia >= 1.11, `develop` writes a machine-local `[sources]` path into the tracked
+    `Project.toml`, so `dev_setup.jl` restores that file afterwards and only the untracked
+    manifest keeps the path; later runs then work without `MIRADAC_JLL`. **The
+    CI `julia` job (T0.5) cannot instantiate until T9.2, unless it builds or fetches the JLL.**
+  - Tests: (1) a fresh environment with the local JLL, MiraDAC developed, and no `libmiradac`
+    preference (the package's `LocalPreferences.toml` moved away, because `Pkg.test` copies it).
+    `Pkg.test("MiraDAC")` loads `depot/artifacts/9834a1bc…/lib/libmiradac_c.so` and passes 1228/1228,
+    including T5.6 coexistence with SymEngine_jll 0.12.0. (2) `MIRADAC_JLL=… julia julia/dev_setup.jl`,
+    then `Pkg.test()` loads `build/capi/libmiradac_c.so` and passes 1228/1228. (3)
+    `ctest --test-dir build -R capi` passes 3/3. Julia 1.10 was not run (not installed).
+  - For the other platforms: each must build GMP-linked static SymEngine with the toolchain file.
+    The export check uses `nm -D`, which needs a Mach-O variant on macOS and an export-table check
+    on Windows. `-Wl,--exclude-libs,ALL` and the version script `capi/src/exports.map` are GNU ld
+    options, so `capi/CMakeLists.txt` may need a branch for Apple ld (`-exported_symbols_list`) and
+    for MinGW. That is a CMake change, to be planned there.
+- *As built (second step, `aarch64-apple-darwin` + `x86_64-apple-darwin`, 2026-10-02, branch
+  `zhanghe9704/jll-macos`):* the CMake change above is in (`capi/CMakeLists.txt` compiles the C API
+  sources as an OBJECT library and links with `-Wl,-exported_symbols_list,<generated list>`; the
+  list comes from `nm -U` over the objects, since most of the API is declared through macros in
+  `miradac.h` — the header cannot be parsed). The numeric-only cross-check compiled both targets
+  with Clang 18/libc++ with zero warnings and no source change; an include-hygiene commit added
+  direct `<algorithm>`/`<utility>`/`<type_traits>` includes (libc++ prunes transitive ones). The
+  recipe's audit is per format now: `nm -gU` and the `_mdac_` pattern on darwin (the sandbox nm is
+  cctools nm: no `-D`, no `--defined-only`), `nm -D --defined-only` and `mdac_` elsewhere. Both
+  darwin legs build the full symbolic recipe (static SymEngine + `GMP_jll`, ~5 min each) and pass
+  the audit: 561 `mdac_*` exports, nothing else, install name `@rpath/libmiradac_c.dylib`,
+  `@rpath/libgmp.10.dylib` the only non-runtime dependency. The darwin builds need
+  `BINARYBUILDER_AUTOMATIC_APPLE=true` (Apple SDK terms) and the MiraDAC GitSource at a commit
+  with the per-linker capi CMake (after v1.1.0); they were verified with the recipe driven against
+  a `DirectorySource` of the branch. Runtime tests are for the machines that can run them.
 
 **T9.2 `MiraDAC_jll`.** Submit the recipe to Yggdrasil (from the user's GitHub account); once
 merged, make `MiraDAC_jll` the default library in `src/MiraDAC.jl` (the preference still
