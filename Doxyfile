@@ -3,7 +3,7 @@
 # Run: doxygen Doxyfile  (from repo root)
 
 PROJECT_NAME           = "da"
-PROJECT_NUMBER         = 1.1.2
+PROJECT_NUMBER         = 1.1.3
 PROJECT_BRIEF          = "MiraDAC is a unified numerical (NDA) and symbolic (SDA) Differential Algebra library in C++"
 
 OUTPUT_DIRECTORY       = doc/doxygen

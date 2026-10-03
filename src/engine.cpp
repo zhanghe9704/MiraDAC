@@ -451,7 +451,9 @@ void ad_mult(Layout& layout, Pool<T>& pool,
             for (unsigned j = 1; j < M; ++j)
                 dv[pidx[i][j]] += lv[i] * rv[j];
         }
-        if (pidx[i][M-1] >= L) L = pidx[i][M-1] + 1;
+        // Row i of prdidx holds the products i*j for 1 <= j < M; its entry 0 is never
+        // written. With M <= 1 (rhs a constant, or zero with M == 0) there is no product.
+        if (M > 1 && pidx[i][M-1] >= L) L = pidx[i][M-1] + 1;
     }
 
     if (L > full_len) L = full_len;
