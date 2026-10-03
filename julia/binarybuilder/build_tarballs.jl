@@ -57,14 +57,20 @@ mkdir -p ${SE}/share/symengine
     printf '%s\n' "${STAMP_OPTS[@]}"
 } > ${SE}/share/symengine/miradac-pin.txt
 
-# 2. libmiradac_c only (the other targets are not installed).
+# 2. libmiradac_c only (the other targets are not installed). SymEngine installs its
+#    CMake package to <prefix>/CMake on Windows and <prefix>/lib/cmake/symengine elsewhere
+#    (SymEngine's own INSTALL_CMAKE_DIR), so the hint follows the target.
+case "${target}" in
+    *-mingw32) SE_CMAKE_DIR=${SE}/CMake ;;
+    *)         SE_CMAKE_DIR=${SE}/lib/cmake/symengine ;;
+esac
 cmake -S MiraDAC -B build-miradac -G Ninja \
     -DCMAKE_INSTALL_PREFIX=${prefix} \
     -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TARGET_TOOLCHAIN} \
     -DCMAKE_BUILD_TYPE=Release \
     -DDA_BUILD_CAPI=ON -DDA_BUILD_TESTS=OFF -DDA_BUILD_EXAMPLES=OFF \
     -DWITH_SYMBOLIC=ON -DDA_IGNORE_SYMENGINE_PIN=ON \
-    -DSymEngine_DIR=${SE}/lib/cmake/symengine \
+    -DSymEngine_DIR=${SE_CMAKE_DIR} \
     -DCMAKE_SKIP_BUILD_RPATH=ON  # the build-tree binary is shipped; the audit sets its RPATH
 cmake --build build-miradac --target miradac_c --parallel ${nproc}
 
@@ -75,9 +81,20 @@ install_license MiraDAC/LICENSE
 # Only mdac_* (plus toolchain symbols such as _init/_fini) may be exported. The check is
 # per-object format: -D is ELF-only and cctools nm (the darwin one) has no --defined-only,
 # while -gU (external, defined) works there; Mach-O symbols also carry a leading underscore.
+# PE DLLs have no dynamic symbol table (nm -D reports "no symbols"); objdump -p reads the
+# export table — the names are the "[   N] name" lines under the [Ordinal/Name Pointer]
+# Table heading (the 32-bit objdump omits the "+base[...]" the 64-bit one shows), and the
+# section ends at the next column-0 heading, before the relocations, whose lines also
+# carry bracketed numbers.
 if [ "${dlext}" = "dylib" ]; then
     LEAK=$(nm -gU ${libdir}/libmiradac_c.${dlext} | awk '{print $NF}' \
            | grep -v -E '^_mdac_' || true)
+elif [ "${dlext}" = "dll" ]; then
+    TDUMP=${target}-objdump
+    command -v ${TDUMP} >/dev/null 2>&1 || TDUMP=objdump
+    LEAK=$(${TDUMP} -p ${libdir}/libmiradac_c.${dlext} \
+           | awk '/Ordinal\/Name Pointer\] Table/{inord=1;next} inord && /^[^\t]/{inord=0} inord && /^\t\[ *[0-9]+\]/{print $NF}' \
+           | grep -v -E '^(mdac_|__imp_mdac_)' || true)
 else
     LEAK=$(nm -D --defined-only ${libdir}/libmiradac_c.${dlext} | awk '{print $3}' \
            | grep -v -E '^(mdac_|_init$|_fini$|_edata$|_end$|__bss_start$)' || true)
@@ -85,15 +102,19 @@ fi
 [ -z "${LEAK}" ] || { echo "libmiradac_c exports non-mdac symbols:"; echo "${LEAK}"; exit 1; }
 """
 
-# x86_64-linux-gnu first (T9.1), then the Apple platforms. BinaryBuilderBase >= 1.x expands
-# to the cxx11 string ABI only (cxx03 needs `old_abis=true`), so this is x86_64-linux-gnu-cxx11;
-# the macOS platforms use libc++ and have no cxxstring ABI to expand. Building for macOS needs
-# capi/CMakeLists.txt from after "capi: choose the exported-symbol mechanism per linker" — the
-# GitSource commit below must include it (or a later release tag) for the darwin leg to link.
+# x86_64-linux-gnu first (T9.1), then the Apple platforms, then Windows. BinaryBuilderBase
+# >= 1.x expands to the cxx11 string ABI only (cxx03 needs `old_abis=true`), so this is
+# x86_64-linux-gnu-cxx11; the macOS platforms use libc++ and the MinGW ones libstdc++ with
+# no cxxstring ABI to expand. Building for macOS needs capi/CMakeLists.txt from after
+# "capi: choose the exported-symbol mechanism per linker", and the MinGW legs from after
+# "capi: restrict MinGW DLL exports with a generated .def file" — the GitSource commit
+# below must include both (or a later release tag) for those legs to link.
 platforms = vcat(
     expand_cxxstring_abis(Platform("x86_64", "linux"; libc="glibc")),
     Platform("aarch64", "macos"),
     Platform("x86_64", "macos"),
+    Platform("x86_64", "windows"),
+    Platform("i686", "windows"),
 )
 
 products = [
