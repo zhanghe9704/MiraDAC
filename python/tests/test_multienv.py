@@ -139,6 +139,9 @@ def test_default_env_without_user_vectors_is_retired_not_freed():
     assert b.retired
 
 
+# A 600 GB pool fails at once only where the kernel refuses to overcommit that much
+# (Linux); macOS hands out the address space lazily, and filling it gets the process killed.
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="relies on Linux overcommit")
 def test_failed_env_construction_keeps_current_env(envs):
     a, _ = envs
     with pytest.raises(MemoryError):
