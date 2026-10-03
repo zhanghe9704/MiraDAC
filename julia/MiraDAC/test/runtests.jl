@@ -6,7 +6,8 @@ using Test
 @testset "MiraDAC" begin
     @testset "library" begin
         @info "MiraDAC: C API library" Libdl.dlpath(MiraDAC.libmiradac)
-        version = match(r"^version = \"(.*)\"$"m,
+        # No `$`: a CRLF checkout (Windows) puts \r before the end of the line.
+        version = match(r"^version = \"([^\"]*)\""m,
                         read(joinpath(@__DIR__, "..", "Project.toml"), String))[1]
         @test MiraDAC.c_version() == version
         # T8.2: a docstring on every exported name (Docs.undocumented_names is Julia >= 1.11).

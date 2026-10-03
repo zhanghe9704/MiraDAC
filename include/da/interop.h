@@ -67,12 +67,12 @@ inline SDA promote(const NDA& src) {
 
     // Copy with promotion: use exact integer when possible to preserve
     // rational arithmetic (e.g., base vector coefficient 1.0 -> integer 1).
-    // int64_t, not long: long is 32-bit on Win64 (LLP64).
+    // int64_t, not long, and exact_integer: long is 32-bit on Win64 (LLP64).
     for (unsigned i = 0; i < len; ++i) {
         double v = src_ptr[i];
         int64_t iv = static_cast<int64_t>(v);
         if (v == static_cast<double>(iv))
-            dst_ptr[i] = E(iv);   // exact integer
+            dst_ptr[i] = exact_integer(iv);   // exact integer
         else
             dst_ptr[i] = E(v);    // float fallback
     }
