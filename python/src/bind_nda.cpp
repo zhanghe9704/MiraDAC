@@ -47,7 +47,8 @@ auto unary(const NDA& v) {
 // vectorizes over points; each output still sums its terms in ascending
 // monomial order, as ad_composition does. AVX2 without FMA contraction
 // rounds exactly like the default build.
-#if defined(__GNUC__) && defined(__x86_64__) && defined(__linux__)
+// GCC's target_clones IFUNC resolver is unsupported by musl.
+#if defined(__GNUC__) && defined(__x86_64__) && defined(__linux__) && defined(__GLIBC__)
 __attribute__((target_clones("avx2", "default")))
 #endif
 void eval_points(const double* pts, size_t n, size_t nv, size_t nd,
