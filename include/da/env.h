@@ -21,10 +21,25 @@
 #include <stdexcept>
 
 #ifdef DA_WITH_SYMBOLIC
+#  include <climits>
+#  include <cstdint>
+#  include <string>
 #  include <symengine/expression.h>
 #endif
 
 namespace da {
+
+#ifdef DA_WITH_SYMBOLIC
+/// An exact SymEngine integer for any int64_t. SymEngine builds integers through
+/// GMP's mpz_init_set_si, which takes a long: 32-bit on Win64 (LLP64), where a
+/// wider value would be truncated, so it goes through its decimal string there.
+inline SymEngine::Expression exact_integer(int64_t v) {
+    if (v >= LONG_MIN && v <= LONG_MAX)
+        return SymEngine::Expression(static_cast<long>(v));
+    return SymEngine::Expression(
+        SymEngine::integer(SymEngine::integer_class(std::to_string(v))));
+}
+#endif
 
 // ======================================================================
 // DAEnv
