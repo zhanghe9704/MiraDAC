@@ -1,17 +1,15 @@
 name: JLL runtime tests
 
-# Dispatch with the run ID of a workflow in this repository that uploaded
-# MiraDAC.v<version>.<platform>.tar.gz files as Actions artifacts.
+# Dispatch with the tag of a published release containing BinaryBuilder tarballs.
 on:
   workflow_dispatch:
     inputs:
-      run_id:
-        description: "Actions run ID containing the BinaryBuilder tarballs"
+      tag:
+        description: "Tag of the published (pre)release containing the tarballs"
         required: true
         type: string
 
 permissions:
-  actions: read
   contents: read
 
 defaults:
@@ -35,12 +33,13 @@ jobs:
           - { os: windows-latest, triplet: x86_64-w64-mingw32 }
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          run-id: ${{ inputs.run_id }}
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/tarballs
-          merge-multiple: true
+      - name: Download release tarballs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/tarballs"
+          gh release download "$TAG" -p 'MiraDAC.v*.tar.gz' -D "$RUNNER_TEMP/tarballs"
       - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.julia }}
@@ -55,7 +54,7 @@ jobs:
           mapfile -d '' files < <(find "$temp/tarballs" -type f \
             -name "MiraDAC.v*.$TRIPLET*.tar.gz" -print0)
           if (( ${#files[@]} == 0 )); then
-            echo "SKIP: no MiraDAC tarball for $TRIPLET in run ${{ inputs.run_id }}"
+            echo "SKIP: no MiraDAC tarball for $TRIPLET in release ${{ inputs.tag }}"
             exit 0
           fi
           if (( ${#files[@]} != 1 )); then

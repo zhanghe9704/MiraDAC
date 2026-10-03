@@ -54,11 +54,25 @@ julia --project=julia/MiraDAC -e 'using Pkg; Pkg.test()'
 
 ## Actions runtime tests
 
-Upload the `products/MiraDAC.v*.tar.gz` files as artifacts of an Actions run
-**in this repository**, for example with `actions/upload-artifact@v4` using
-`path: products/MiraDAC.v*.tar.gz`. Dispatch **JLL runtime tests** with that
-run's numeric ID (the number at the end of its Actions URL) as `run_id`.
-The matrix tests available platforms on Julia 1.10 and 1, logging `SKIP` for
-missing tarballs. The workflow creates a temporary local JLL from each tarball;
-it does not require registration or publish a JLL. Keep
-`julia/MiraDAC/LocalPreferences.toml` absent so the preference cannot override it.
+Create a published prerelease with the built tarballs attached (the
+`MiraDAC-logs...` tarballs are not included by this pattern):
+
+```sh
+gh release create <tag> --prerelease --title "MiraDAC JLL test binaries" \
+  products/MiraDAC.v*.tar.gz
+```
+
+Draft releases are not supported. The workflow downloads matching tarballs from
+that release and tests available platforms on Julia 1.10 and 1, logging `SKIP`
+for missing platforms. It creates a temporary local JLL from each tarball, so no
+JLL registration is needed. Keep `julia/MiraDAC/LocalPreferences.toml` absent so
+the preference cannot override the JLL.
+
+`workflow_dispatch` is available only after this workflow file exists on the
+default branch (`main`). Then dispatch the test branch with:
+
+```sh
+gh workflow run jll-tests.yml --ref jll -f tag=<tag>
+```
+
+Replace `<tag>` with the tag used when creating the prerelease above.
