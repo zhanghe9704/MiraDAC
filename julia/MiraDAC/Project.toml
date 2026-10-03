@@ -1,6 +1,6 @@
 name = "MiraDAC"
 uuid = "df7fbf13-9219-47b3-ad1a-83c9c7825a93"
-version = "1.1.2"
+version = "1.1.3"
 
 [deps]
 Libdl = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
