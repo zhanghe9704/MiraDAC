@@ -1073,6 +1073,29 @@ BinaryBuilder.jl (Docker) and test the tarball with the Julia suite.
   `BINARYBUILDER_AUTOMATIC_APPLE=true` (Apple SDK terms) and the MiraDAC GitSource at a commit
   with the per-linker capi CMake (after v1.1.0); they were verified with the recipe driven against
   a `DirectorySource` of the branch. Runtime tests are for the machines that can run them.
+- *As built (third step, `x86_64-w64-mingw32` + `i686-w64-mingw32`, 2026-10-02, branch
+  `zhanghe9704/jll-windows`):* the MinGW CMake branch is in: `capi/CMakeLists.txt` routes WIN32 to
+  a `.def` file generated from the compiled objects (`gen_export_list.cmake`, `DEF_FILE` mode,
+  plain undecorated names — MinGW ld matches them with or without the i686 leading underscore),
+  and passing a `.def` switches MinGW ld from export-everything to exactly the listed names.
+  Passing the ELF options through had been worse than a link failure: MinGW ld accepts
+  `--version-script` silently on PE, exports nothing, and the DLL ships with an empty export
+  table. The DLL links `-static`: libgcc, libstdc++ and winpthread (pulled in by the emutls
+  behind `thread_local`) are baked in, so the imports stay KERNEL32/msvcrt plus the GMP DLL from
+  `GMP_jll` — the same only-GMP story as the other platforms. The recipe's audit grew a dll
+  branch: `nm -D` does not read PE export tables (it reports "no symbols"), so the exported names
+  come from `objdump -p` (`[Ordinal/Name Pointer] Table`; works for both bitnesses, the 32-bit
+  objdump omits the `+base[...]` column). `-DSymEngine_DIR` points at `<prefix>/CMake` on MinGW,
+  where SymEngine installs its CMake package on WIN32 (`lib/cmake/symengine` elsewhere). The
+  numeric-only cross-check compiled both targets with MinGW GCC 10.2, zero warnings, 561
+  `mdac_*` exports each; both symbolic legs build the full recipe and pass the audit the same
+  way. A latent Win64 bug fixed in passing: the double→exact-integer promotion used `long`
+  (32-bit on Win64, undefined past 2^31); now `int64_t` (`DAEnv::promote`, the interop
+  copy-with-promotion, and the cast in `mdac_expr_new_i`). Tree hashes `882c8c2c…` (x86_64) and
+  `81df14c7…` (i686); the Windows tarball holds `bin/libmiradac_c.dll` (the PE RUNTIME
+  destination), which `LibraryProduct` finds. Verified with the recipe driven against a
+  `DirectorySource` of the branch (the GitSource still pins v1.1.0). Runtime tests are for the
+  machines that can run them (`jll-ci-tests`).
 
 **T9.2 `MiraDAC_jll`.** Submit the recipe to Yggdrasil (from the user's GitHub account); once
 merged, make `MiraDAC_jll` the default library in `src/MiraDAC.jl` (the preference still
