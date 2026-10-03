@@ -12,7 +12,7 @@ symengine_commit = "153b7e98f310bccaae586dab6b49284ccd5f4174"
 
 sources = [
     GitSource("https://github.com/zhanghe9704/MiraDAC.git",
-              "f32dc0725dbdd4bd4af2e6c6591daa213cc58962"),  # tag v1.1.0
+              "aee9f22b5e10a750214d44caa62726b6bffb2831"),  # cross-platform JLL source
     GitSource("https://github.com/symengine/symengine.git", symengine_commit),
 ]
 
@@ -85,13 +85,20 @@ fi
 [ -z "${LEAK}" ] || { echo "libmiradac_c exports non-mdac symbols:"; echo "${LEAK}"; exit 1; }
 """
 
-# x86_64-linux-gnu first (T9.1), then the Apple platforms. BinaryBuilderBase >= 1.x expands
-# to the cxx11 string ABI only (cxx03 needs `old_abis=true`), so this is x86_64-linux-gnu-cxx11;
-# the macOS platforms use libc++ and have no cxxstring ABI to expand. Building for macOS needs
-# capi/CMakeLists.txt from after "capi: choose the exported-symbol mechanism per linker" — the
-# GitSource commit below must include it (or a later release tag) for the darwin leg to link.
+linux_platforms = [
+    Platform("x86_64", "linux"; libc="glibc"),
+    Platform("aarch64", "linux"; libc="glibc"),
+    Platform("x86_64", "linux"; libc="musl"),
+    Platform("aarch64", "linux"; libc="musl"),
+    Platform("armv7l", "linux"; libc="glibc", call_abi="eabihf"),
+    Platform("powerpc64le", "linux"; libc="glibc"),
+    Platform("riscv64", "linux"; libc="glibc"),
+]
+
+# Use the cxx11 ABI for the Linux builds. FreeBSD/macOS use libc++ and need no expansion.
 platforms = vcat(
-    expand_cxxstring_abis(Platform("x86_64", "linux"; libc="glibc")),
+    expand_cxxstring_abis(linux_platforms),
+    Platform("x86_64", "freebsd"),
     Platform("aarch64", "macos"),
     Platform("x86_64", "macos"),
 )
