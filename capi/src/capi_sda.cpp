@@ -149,7 +149,7 @@ mdac_status mdac_expr_new_d(double x, mdac_expr** out) {
 }
 
 mdac_status mdac_expr_new_i(int64_t x, mdac_expr** out) {
-    MDAC_SYM(return make_expr(out, [&] { return Expression(SymEngine::integer(static_cast<long>(x))); });)
+    MDAC_SYM(return make_expr(out, [&] { return Expression(SymEngine::integer(x)); });)
 }
 
 mdac_status mdac_expr_parse(const char* s, mdac_expr** out) {
