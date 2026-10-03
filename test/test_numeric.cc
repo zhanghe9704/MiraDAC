@@ -500,3 +500,30 @@ TEST_CASE("kernels free their temporaries when the pool runs out", "[numeric_lea
     }
     da::da_clear();
 }
+
+// Row i of the product-index table holds the products i*j for j >= 1 only; its entry 0 is
+// never written. ad_mult read it when the right operand was a constant (and read before the
+// row when it was zero), so a product's length came from whatever the heap held: a * NDA(1.0)
+// lost every term in the Julia binding. Poisoning entry 0 makes the failure deterministic.
+TEST_CASE("product by a constant or zero does not read the unwritten prdidx entry",
+          "[numeric]") {
+    da::da_init(3, 6, 400);
+    {
+        const da::Layout& layout = da::da_current_env().layout();
+        unsigned int** pidx = layout.prdidx();
+        for (unsigned i = 1; i < layout.order_index()[layout.max_order()]; ++i)
+            pidx[i][0] = 0xFFFFFFFFu;
+
+        NDA a = NDA(1.2) + da::da_base(1) * da::da_base(2);
+        NDA one(1.0), zero(0.0);
+        REQUIRE(zero.length() <= 1);
+        NDA p = a * one;
+        REQUIRE(p.length() == a.length());
+        REQUIRE(p.con() == 1.2);
+        REQUIRE((p - zero).con() == 1.2);
+        NDA q = a * zero;
+        REQUIRE(q.n_element() == 0);
+        REQUIRE((a * one - a).n_element() == 0);
+    }
+    da::da_clear();
+}
