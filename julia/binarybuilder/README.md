@@ -51,3 +51,14 @@ which `dev_setup.jl` adds when `MIRADAC_JLL` is set:
 MIRADAC_JLL=$S/depot/dev/MiraDAC_jll julia julia/dev_setup.jl
 julia --project=julia/MiraDAC -e 'using Pkg; Pkg.test()'
 ```
+
+## Actions runtime tests
+
+Upload the `products/MiraDAC.v*.tar.gz` files as artifacts of an Actions run
+**in this repository**, for example with `actions/upload-artifact@v4` using
+`path: products/MiraDAC.v*.tar.gz`. Dispatch **JLL runtime tests** with that
+run's numeric ID (the number at the end of its Actions URL) as `run_id`.
+The matrix tests available platforms on Julia 1.10 and 1, logging `SKIP` for
+missing tarballs. The workflow creates a temporary local JLL from each tarball;
+it does not require registration or publish a JLL. Keep
+`julia/MiraDAC/LocalPreferences.toml` absent so the preference cannot override it.
