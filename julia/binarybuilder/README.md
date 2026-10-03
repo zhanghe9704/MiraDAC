@@ -2,8 +2,9 @@
 
 `build_tarballs.jl` builds `libmiradac_c` (the C API) of the tagged MiraDAC commit with the pinned
 SymEngine (`cmake/symengine_pin.txt`) linked statically and hidden, and GMP from `GMP_jll`
-(DEVELOPMENT_PLAN_JULIA.md, T9.1). Platforms: `x86_64-linux-gnu` and `aarch64`/`x86_64`
-Apple. The tarball holds `lib/libmiradac_c.{so,dylib}`, `include/miradac.h` and the license.
+(DEVELOPMENT_PLAN_JULIA.md, T9.1). Platforms: `x86_64-linux-gnu`, `aarch64`/`x86_64`
+Apple and `x86_64`/`i686` Windows. The tarball holds `lib/libmiradac_c.{so,dylib}` /
+`bin/libmiradac_c.dll`, `include/miradac.h` and the license.
 
 ## Local build (all platforms)
 

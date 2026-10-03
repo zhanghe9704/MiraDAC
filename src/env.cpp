@@ -8,6 +8,7 @@
 #include <memory>
 #include <vector>
 #include <stdexcept>
+#include <cstdint>    // int64_t
 #include <utility>   // std::move
 
 namespace da {
@@ -102,8 +103,10 @@ unsigned DAEnv::promote(const DAEnv& src_env, unsigned src_slot) {
     const double* src = src_pool.slot(src_slot);
     SymEngine::Expression* dst = dst_pool.slot(dst_slot);
     // Same rule as promote(const NDA&): an integer value becomes an exact integer.
+    // int64_t, not long: long is 32-bit on Win64 (LLP64), so doubles outside the
+    // 32-bit range would be undefined there while staying 64-bit elsewhere.
     for (unsigned i = 0; i < len; ++i) {
-        long iv = static_cast<long>(src[i]);
+        int64_t iv = static_cast<int64_t>(src[i]);
         if (src[i] == static_cast<double>(iv))
             dst[i] = SymEngine::Expression(iv);
         else
