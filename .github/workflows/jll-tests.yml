@@ -23,13 +23,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-latest, ubuntu-24.04-arm, macos-14, macos-13, windows-latest ]
+        os: [ ubuntu-latest, ubuntu-24.04-arm, macos-14, macos-15-intel, windows-latest ]
         julia: [ "1.10", "1" ]
         include:
           - { os: ubuntu-latest, triplet: x86_64-linux-gnu }
           - { os: ubuntu-24.04-arm, triplet: aarch64-linux-gnu }
           - { os: macos-14, triplet: aarch64-apple-darwin }
-          - { os: macos-13, triplet: x86_64-apple-darwin }
+          - { os: macos-15-intel, triplet: x86_64-apple-darwin }
           - { os: windows-latest, triplet: x86_64-w64-mingw32 }
     steps:
       - uses: actions/checkout@v4
