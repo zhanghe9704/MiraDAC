@@ -268,7 +268,9 @@
         clear!()
     end
 
-    @testset "failed env construction keeps the current env" begin
+    # A 600 GB pool fails at once only where the kernel refuses to overcommit that much
+    # (Linux); macOS hands out the address space lazily, and filling it gets the process killed.
+    Sys.islinux() && @testset "failed env construction keeps the current env" begin
         envs() do a, b
             @test_throws ErrorException DAEnv(4, 3, 2^31)    # std::bad_alloc, MDAC_ERR_RUNTIME
             @test current_env() == a
