@@ -64,7 +64,8 @@ mdac_ndalist* zeros(size_t n) {
 // in blocks of kB with the point index innermost, so the compiler vectorizes
 // over points; each output still sums its terms in ascending monomial order,
 // as ad_composition does, so the results equal compose(map, point) bit for bit.
-#if defined(__GNUC__) && defined(__x86_64__) && defined(__linux__)
+// GCC's target_clones IFUNC resolver is unsupported by musl.
+#if defined(__GNUC__) && defined(__x86_64__) && defined(__linux__) && defined(__GLIBC__)
 __attribute__((target_clones("avx2", "default")))
 #endif
 void eval_points(const double* pts, size_t n, size_t nv, size_t nd,

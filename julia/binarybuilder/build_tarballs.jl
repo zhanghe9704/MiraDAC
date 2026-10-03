@@ -102,15 +102,25 @@ fi
 [ -z "${LEAK}" ] || { echo "libmiradac_c exports non-mdac symbols:"; echo "${LEAK}"; exit 1; }
 """
 
-# x86_64-linux-gnu first (T9.1), then the Apple platforms, then Windows. BinaryBuilderBase
-# >= 1.x expands to the cxx11 string ABI only (cxx03 needs `old_abis=true`), so this is
-# x86_64-linux-gnu-cxx11; the macOS platforms use libc++ and the MinGW ones libstdc++ with
-# no cxxstring ABI to expand. Building for macOS needs capi/CMakeLists.txt from after
-# "capi: choose the exported-symbol mechanism per linker", and the MinGW legs from after
-# "capi: restrict MinGW DLL exports with a generated .def file" — the GitSource commit
-# below must include both (or a later release tag) for those legs to link.
+linux_platforms = [
+    Platform("x86_64", "linux"; libc="glibc"),
+    Platform("aarch64", "linux"; libc="glibc"),
+    Platform("x86_64", "linux"; libc="musl"),
+    Platform("aarch64", "linux"; libc="musl"),
+    Platform("armv7l", "linux"; libc="glibc", call_abi="eabihf"),
+    Platform("powerpc64le", "linux"; libc="glibc"),
+    Platform("riscv64", "linux"; libc="glibc"),
+]
+
+# BinaryBuilderBase >= 1.x expands the Linux platforms to the cxx11 string ABI only (cxx03 needs
+# `old_abis=true`); FreeBSD and macOS use libc++ and the MinGW targets libstdc++ with no
+# cxxstring ABI to expand. The darwin legs need capi/CMakeLists.txt from after "capi: choose the
+# exported-symbol mechanism per linker", the MinGW legs from after "capi: restrict MinGW DLL
+# exports with a generated .def file" and the musl legs from after "Gate AVX2 IFUNC dispatch on
+# glibc" — the GitSource commit above must include all three (a release after v1.1.0).
 platforms = vcat(
-    expand_cxxstring_abis(Platform("x86_64", "linux"; libc="glibc")),
+    expand_cxxstring_abis(linux_platforms),
+    Platform("x86_64", "freebsd"),
     Platform("aarch64", "macos"),
     Platform("x86_64", "macos"),
     Platform("x86_64", "windows"),
