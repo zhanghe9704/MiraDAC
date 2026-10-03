@@ -15,6 +15,14 @@ option(DA_BUILD_BENCH "Build the C++ baseline benchmark for the Python binding" 
 option(DA_BUILD_CAPI "Build the C API library miradac_c" OFF)
 set(DA_CHECK_ENV 1 CACHE STRING "Enable env guard (1=on, 0=off)")
 
+# No floating-point contraction: GCC fuses a*b+c into one FMA by default wherever the
+# target has FMA (aarch64, ppc64le, riscv64; Clang within an expression), which rounds
+# differently, so results would differ by platform, from the reference files and between
+# evaluate_map's batched loop and compose.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    add_compile_options(-ffp-contract=off)
+endif()
+
 # A Python build (scikit-build-core) links daStatic into a shared module, so it
 # needs PIC, and it builds nothing but the library and the module.
 if(SKBUILD)
