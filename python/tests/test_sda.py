@@ -118,7 +118,7 @@ def test_binary_operators(ab):
     assert coeffs(s - x) == ["a", "0"]
     assert coeffs(x - s) == ["-a", "0"]
     assert coeffs((s * x).expand()) == ["0", "a", "0", "0", "1"]
-    assert coeffs(-s) == ["-1.0*a", "-1.0"]
+    assert coeffs(-s) == ["-a", "-1"]
     assert coeffs(+s) == ["a", "1"]
     assert coeffs(s ** 2) == coeffs(s * s)
     one = da.SDA(1) + da.svar(0)
@@ -181,7 +181,7 @@ def test_functions(ab):
         assert isinstance(f(s), da.SDA)
     assert coeffs(da.pow(s, 2)) == coeffs(s * s)
     assert isinstance(da.pow(s, 0.5), da.SDA)
-    assert coeffs(da.exp(s))[:2] == ["exp(a)", "1.0*exp(a)"]
+    assert coeffs(da.exp(s))[:2] == ["exp(a)", "exp(a)"]
     for f in (da.asinh, da.acosh, da.atanh, da.abs):
         with pytest.raises(TypeError):
             f(s)
@@ -193,7 +193,7 @@ def test_der_int_forms(ab):
     a, _ = ab
     s = a * da.svar(0) * da.svar(0)
     d = da.der(s, 0)
-    assert coeffs(d) == ["0", "2.0*a"]
+    assert coeffs(d) == ["0", "2*a"]
     out = da.SDA()
     da.da_der(s, 0, out)
     assert coeffs(out) == coeffs(d)
@@ -310,3 +310,21 @@ def test_symengine_objects(env):
     r = da.evaluate(x * da.svar(0) + y, [x, ey], [2.0, 0.5])
     assert list(r.coeffs()) == [0.5, 2.0]
     assert (x * da.svar(0)).subs({x: y}).element(1) == ey
+
+
+def test_integer_constants_keep_coefficients_exact(env):
+    # der, -f and the series of exp, sqrt and log used to turn exact rational
+    # coefficients into floats (3.0*k, 0.333333333333333).
+    (k,) = da.symbols("k")
+    x, y = da.svar(0), da.svar(1)
+    f = k * x**3 + x / 3 + y / 5
+    g = 2 + x / 3 + k * y
+
+    df = coeffs(da.der(f, 0))
+    assert df[0] == "1/3" and "3*k" in df
+    assert coeffs(-f)[1] == "-1/3" and "-k" in coeffs(-f)
+    assert "-1/8" in coeffs(da.sqrt(1 + x))
+    z = -da.CSDA(g, x / 5)
+    for r in [da.der(f, 0), -f, da.int_(f, 0), da.exp(g), da.sqrt(g), da.log(g),
+              f / 2, 2 - f, 2 / g, z.real, z.imag]:
+        assert not any("." in c for c in coeffs(r)), r

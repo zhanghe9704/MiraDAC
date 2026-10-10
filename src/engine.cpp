@@ -681,11 +681,14 @@ void ad_sqrt(Layout& layout, Pool<T>& pool, unsigned iv, unsigned iret)
     ad_copy(layout, pool, ip, itmp);
     ad_copy(layout, pool, ip, ipn);
 
-    double c = 0.5;
+    // The series coefficients in T, built from integers: exact rationals for a
+    // symbolic T, the same double operations as before for T = double.
+    T c = T{1} / T{2};
     for (unsigned i = 1; i < gnd + 1; ++i) {
-        ad_mult_const(layout, pool, itmp, T{c});
+        ad_mult_const(layout, pool, itmp, c);
         ad_add(layout, pool, iret, itmp);
-        c = c * (1.0 - 2.0*i) / 2.0 / (i + 1.0);
+        c = c * static_cast<T>(1 - 2*static_cast<int>(i)) / T{2}
+              / static_cast<T>(static_cast<int>(i) + 1);
         ad_mult(layout, pool, ip, ipn, itmp);
         ad_copy(layout, pool, itmp, ipn);
     }
@@ -718,10 +721,10 @@ void ad_exp(Layout& layout, Pool<T>& pool, unsigned iv, unsigned iret)
     ad_copy(layout, pool, ip, itmp);
     ad_copy(layout, pool, ip, ipn);
 
-    double c = 1.0;
+    T c = T{1};   // i!, built from integers (exact for a symbolic T)
     for (unsigned i = 1; i < gnd + 1; ++i) {
-        c = c * static_cast<double>(i);
-        ad_div_c(layout, pool, itmp, T{c});
+        c = c * static_cast<T>(static_cast<int>(i));
+        ad_div_c(layout, pool, itmp, c);
         ad_add(layout, pool, iret, itmp);
         ad_mult(layout, pool, ip, ipn, itmp);
         ad_copy(layout, pool, itmp, ipn);
@@ -757,8 +760,8 @@ void ad_log(Layout& layout, Pool<T>& pool, unsigned iv, unsigned iret)
     ad_copy(layout, pool, ip, ipn);
 
     for (unsigned i = 1; i < gnd + 1; ++i) {
-        double c = (i % 2 == 0) ? -1.0*i : 1.0*i;
-        ad_div_c(layout, pool, itmp, T{c});
+        int c = (i % 2 == 0) ? -static_cast<int>(i) : static_cast<int>(i);
+        ad_div_c(layout, pool, itmp, static_cast<T>(c));
         ad_add(layout, pool, iret, itmp);
         ad_mult(layout, pool, ip, ipn, itmp);
         ad_copy(layout, pool, itmp, ipn);
@@ -932,7 +935,8 @@ void ad_der(Layout& layout, Pool<T>& pool,
             k += H[gnv-j][bv[j]];
         }
 
-        vret[k] = vsrc[i] * static_cast<T>(static_cast<double>(jexp));
+        // From an int, not a double: an exact integer for a symbolic T.
+        vret[k] = vsrc[i] * static_cast<T>(static_cast<int>(jexp));
         if (k >= pool.len(iret))
             pool.set_len(iret, static_cast<unsigned>(k + 1));
     }

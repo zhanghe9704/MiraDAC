@@ -109,7 +109,7 @@ struct DAVector {
     explicit DAVector(int x)
         : env_(&da_current_env()), slot_(env_->template pool<T>().alloc())
     {
-        T val{static_cast<T>(static_cast<double>(x))};
+        T val{static_cast<T>(x)};
         detail::ad_const(env_->layout(), env_->template pool<T>(), slot_, val);
     }
 
@@ -171,7 +171,7 @@ struct DAVector {
     }
 
     DAVector& operator=(int x) {
-        reset_const(static_cast<T>(static_cast<double>(x)));
+        reset_const(static_cast<T>(x));
         return *this;
     }
 
@@ -197,7 +197,7 @@ struct DAVector {
 
     DAVector& operator+=(int x) {
         detail::ad_add_const(env_->layout(), env_->template pool<T>(), slot_,
-                             static_cast<T>(static_cast<double>(x)));
+                             static_cast<T>(x));
         return *this;
     }
 
@@ -219,7 +219,7 @@ struct DAVector {
 
     DAVector& operator-=(int x) {
         detail::ad_add_const(env_->layout(), env_->template pool<T>(), slot_,
-                             static_cast<T>(static_cast<double>(-x)));
+                             static_cast<T>(-x));
         return *this;
     }
 
@@ -240,7 +240,7 @@ struct DAVector {
 
     DAVector& operator*=(int x) {
         detail::ad_mult_const(env_->layout(), env_->template pool<T>(), slot_,
-                              static_cast<T>(static_cast<double>(x)));
+                              static_cast<T>(x));
         return *this;
     }
 
@@ -261,7 +261,7 @@ struct DAVector {
 
     DAVector& operator/=(int x) {
         detail::ad_div_c(env_->layout(), env_->template pool<T>(), slot_,
-                         static_cast<T>(static_cast<double>(x)));
+                         static_cast<T>(x));
         return *this;
     }
 
@@ -775,7 +775,7 @@ DAVector<T> operator-(double x, const DAVector<T>& a) {
     }
     // res = -a + x
     detail::ad_mult_c(a.env_->layout(), a.env_->template pool<T>(), a.slot_,
-                      static_cast<T>(-1.0), res.slot_);
+                      static_cast<T>(-1), res.slot_);
     detail::ad_add_const(a.env_->layout(), a.env_->template pool<T>(), res.slot_,
                          static_cast<T>(x));
     return res;
@@ -829,7 +829,10 @@ DAVector<T> operator+(const DAVector<T>& a) {
 
 template<class T>
 DAVector<T> operator-(const DAVector<T>& a) {
-    return a * (-1.0);
+    // -1 from an int, not a double: an exact integer for a symbolic T.
+    DAVector<T> res(a);
+    res *= -1;
+    return res;
 }
 
 // --- Equality ---

@@ -631,4 +631,62 @@ TEST_CASE("SDA print puts the bases before the coefficient", "[symbolic]") {
     da::da_clear();
 }
 
+// ===========================================================================
+// Exact coefficients: der, unary minus, the int operators and the series of
+// exp, sqrt and log keep rational SDA coefficients exact. They built their
+// constants from doubles, which gave floats (3.0*k, 0.333333333333333).
+// ===========================================================================
+namespace {
+// A float coefficient prints with a decimal point; integers, rationals and
+// symbols do not.
+bool has_float(const SDA& v) {
+    const auto& pool = v.env_->pool<Expression>();
+    for (unsigned i = 0; i < pool.len(v.slot_); ++i) {
+        std::ostringstream os;
+        os << pool.slot(v.slot_)[i];
+        if (os.str().find('.') != std::string::npos) return true;
+    }
+    return false;
+}
+bool has_float(const da::CSDA& z) { return has_float(da::get_real(z)) || has_float(da::get_imag(z)); }
+Expression coeff(const SDA& v, std::vector<int> idx) {
+    Expression e;
+    da::detail::ad_pek(v.env_->layout(), v.env_->pool<Expression>(), v.slot_,
+                       idx.data(), idx.size(), e);
+    return e;
+}
+}
+
+TEST_CASE("SDA operations with integer constants keep coefficients exact", "[symbolic]") {
+    da::da_init(4u, 2u, 400u);
+    {
+        Expression k("k");
+        SDA x = da::promote(da::base[0]), y = da::promote(da::base[1]);
+        const Expression one(1), two(2), three(3), five(5);
+        SDA f = k * x * x * x + x / three + y / five;
+        SDA g = two + x / three + k * y;
+        REQUIRE_FALSE(has_float(f));
+
+        SDA df = da::da_der(f, 0u);
+        REQUIRE(coeff(df, {0, 0}) == Expression(1) / 3);
+        REQUIRE(coeff(df, {2, 0}) == 3 * k);
+        SDA nf = -f;
+        REQUIRE(coeff(nf, {1, 0}) == Expression(-1) / 3);
+        REQUIRE(coeff(nf, {3, 0}) == -k);
+
+        for (const SDA& r : {df, nf, da::da_int(f, 0u), da::exp(g), da::sqrt(g), da::log(g),
+                             f / g, SDA(2)})
+            REQUIRE_FALSE(has_float(r));
+        REQUIRE(coeff(da::exp(x), {2, 0}) == Expression(1) / 2);
+        REQUIRE(coeff(da::sqrt(one + x), {2, 0}) == Expression(-1) / 8);
+        REQUIRE(coeff(da::log(one + x), {2, 0}) == Expression(-1) / 2);
+
+        SDA v = f;
+        v += 2; v -= 3; v *= 2; v /= 3;
+        REQUIRE_FALSE(has_float(v));
+        REQUIRE_FALSE(has_float(-da::CSDA(g, x / five)));
+    }
+    da::da_clear();
+}
+
 #endif // DA_WITH_SYMBOLIC

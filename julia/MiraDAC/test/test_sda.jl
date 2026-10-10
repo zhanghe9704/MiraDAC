@@ -76,7 +76,7 @@ scoeffs(v) = string.(coeffs(v))
         @test scoeffs(s - x) == ["a", "0"]
         @test scoeffs(x - s) == ["-a", "0"]
         @test scoeffs(MiraDAC.expand(s * x)) == ["0", "a", "0", "0", "1"]
-        @test scoeffs(-s) == ["-1.0*a", "-1.0"]
+        @test scoeffs(-s) == ["-a", "-1"]
         @test scoeffs(s^2) == scoeffs(s * s)
         one = SDA(1) + sdavar(1)
         @test scoeffs(MiraDAC.expand(1 / one)) == scoeffs(MiraDAC.expand(one^-1))
@@ -138,7 +138,7 @@ scoeffs(v) = string.(coeffs(v))
         for f in (sqrt, exp, log, sin, cos, tan, asin, acos, atan, sinh, cosh, tanh, erf)
             @test f(s) isa SDA
         end
-        @test scoeffs(exp(s))[1:2] == ["exp(a)", "1.0*exp(a)"]
+        @test scoeffs(exp(s))[1:2] == ["exp(a)", "exp(a)"]
         for f in (asinh, acosh, atanh, abs)
             @test_throws MethodError f(s)
         end
@@ -147,7 +147,7 @@ scoeffs(v) = string.(coeffs(v))
 
     @testset "der and integ" begin
         s = a * sdavar(1) * sdavar(1)
-        @test scoeffs(der(s, 1)) == ["0", "2.0*a"]
+        @test scoeffs(der(s, 1)) == ["0", "2*a"]
         @test coeff(integ(sdavar(2) * a, 2), [0, 2, 0]) == a / 2
         @test_throws BoundsError der(s, 4)
         @test_throws BoundsError integ(s, 0)

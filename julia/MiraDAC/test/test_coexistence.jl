@@ -11,7 +11,7 @@ end
 init!(4, 2, 400)
 a = SymExpr("a")
 s = exp(a + sdavar(1)) * (1 + davar(2))
-ok = [string.(coeffs(s))[1:3] == ["exp(a)", "1.0*exp(a)", "exp(a)"],
+ok = [string.(coeffs(s))[1:3] == ["exp(a)", "exp(a)", "exp(a)"],
       coeffs(evaluate(s, Dict(a => 0.5)))[1:3] ≈ [exp(0.5), exp(0.5), exp(0.5)]]
 x, y = SymEngine.symbols("x y")
 e = SymEngine.expand((x + y)^3)
